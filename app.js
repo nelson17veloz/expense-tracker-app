@@ -1,42 +1,55 @@
-  const firebaseConfig = {
-    apiKey: "AIzaSyBspytMh9FSEc9Fg8rL4bb9W7hQXngiOtA",
-    authDomain: "expense-tracker-dfb13.firebaseapp.com",
-    projectId: "expense-tracker-dfb13",
-    storageBucket: "expense-tracker-dfb13.firebasestorage.app",
-    messagingSenderId: "920792166929",
-    appId: "1:920792166929:web:88b5fd1bdd2441726377b0"
-  };
+// ==========================
+// FIREBASE SETUP
+// ==========================
 
-  // Initialize Firebase
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
 
-let balance = 0;
-let transactions = JSON.parse(localStorage.getItem("transactions")) || [];
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-function updateUI() {
-  const list = document.getElementById("list");
-  const balanceEl = document.getElementById("balance");
+// ==========================
+// APP STATE
+// ==========================
 
-  list.innerHTML = "";
-  balance = 0;
+let transactions = [];
 
-  transactions.forEach(t => {
-    const li = document.createElement("li");
-    li.textContent = `${t.type}: ${t.desc} $${t.amount}`;
-    list.appendChild(li);
+// ==========================
+// LOAD DATA (REAL TIME)
+// ==========================
 
-    if (t.type === "Income") balance += t.amount;
-    else balance -= t.amount;
-  });
+function loadTransactions() {
+  db.collection("transactions")
+    .orderBy("timestamp", "asc")
+    .onSnapshot(snapshot => {
+      transactions = [];
 
-  balanceEl.textContent = `$${balance}`;
-  localStorage.setItem("transactions", JSON.stringify(transactions));
+      snapshot.forEach(doc => {
+        transactions.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+
+      updateUI();
+    });
 }
+
+// ==========================
+// ADD TRANSACTION
+// ==========================
 
 function addTransaction(type) {
   const desc = document.getElementById("desc").value;
   const amount = Number(document.getElementById("amount").value);
+
+  if (!desc || !amount) return;
 
   db.collection("transactions").add({
     type,
@@ -44,22 +57,51 @@ function addTransaction(type) {
     amount,
     timestamp: Date.now()
   });
+
+  // clear inputs after adding
+  document.getElementById("desc").value = "";
+  document.getElementById("amount").value = "";
 }
 
+// Buttons
 function addIncome() {
   addTransaction("Income");
 }
 
-function loadTransactions() {
-  db.collection("transactions")
-    .orderBy("timestamp")
-    .onSnapshot(snapshot => {
-      transactions = [];
-
-      snapshot.forEach(doc => {
-        transactions.push(doc.data());
-      });
-
-      updateUI();
-    });
+function addExpense() {
+  addTransaction("Expense");
 }
+
+// ==========================
+// UPDATE UI
+// ==========================
+
+function updateUI() {
+  const list = document.getElementById("list");
+  const balanceEl = document.getElementById("balance");
+
+  list.innerHTML = "";
+
+  let balance = 0;
+
+  transactions.forEach(t => {
+    const li = document.createElement("li");
+
+    li.textContent = `${t.type}: ${t.desc} $${t.amount}`;
+    list.appendChild(li);
+
+    if (t.type === "Income") {
+      balance += t.amount;
+    } else {
+      balance -= t.amount;
+    }
+  });
+
+  balanceEl.textContent = `$${balance}`;
+}
+
+// ==========================
+// START APP
+// ==========================
+
+loadTransactions();
