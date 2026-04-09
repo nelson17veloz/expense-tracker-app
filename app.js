@@ -102,27 +102,36 @@ function updateUI() {
   transactions.forEach(t => {
     const li = document.createElement("li");
 
-    // TEXT
+    // text
     const text = document.createElement("span");
     text.textContent = `${t.type}: ${t.desc} $${t.amount}`;
 
-    // EDIT BUTTON
+    // container for buttons
+    const btnContainer = document.createElement("span");
+
+    // EDIT button
     const editBtn = document.createElement("button");
     editBtn.textContent = "Edit";
-    editBtn.onclick = () => editTransaction(t.id, t.desc, t.amount);
+    editBtn.onclick = () => {
+      editTransaction(t.id, t.desc, t.amount);
+    };
 
-    // DELETE BUTTON
+    // DELETE button
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "Delete";
-    deleteBtn.onclick = () => deleteTransaction(t.id);
+    deleteBtn.onclick = () => {
+      deleteTransaction(t.id);
+    };
 
-    // STYLE (simple inline spacing)
+    // spacing
     editBtn.style.marginLeft = "10px";
     deleteBtn.style.marginLeft = "5px";
 
+    btnContainer.appendChild(editBtn);
+    btnContainer.appendChild(deleteBtn);
+
     li.appendChild(text);
-    li.appendChild(editBtn);
-    li.appendChild(deleteBtn);
+    li.appendChild(btnContainer);
 
     list.appendChild(li);
 
