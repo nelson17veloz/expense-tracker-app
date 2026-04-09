@@ -1,11 +1,11 @@
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyBspytMh9FSEc9Fg8rL4bb9W7hQXngiOtA",
+  authDomain: "expense-tracker-dfb13.firebaseapp.com",
+  projectId: "expense-tracker-dfb13",
+  storageBucket: "expense-tracker-dfb13.firebasestorage.app",
+  messagingSenderId: "920792166929",
+  appId: "1:920792166929:web:88b5fd1bdd2441726377b0"
 };
 
 firebase.initializeApp(firebaseConfig);
