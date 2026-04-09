@@ -1,0 +1,46 @@
+body {
+  font-family: Arial;
+  background: #111;
+  color: white;
+  margin: 0;
+}
+
+.container {
+  padding: 20px;
+  max-width: 400px;
+  margin: auto;
+}
+
+h1 {
+  text-align: center;
+}
+
+input, button {
+  width: 100%;
+  padding: 12px;
+  margin: 5px 0;
+  border: none;
+  border-radius: 8px;
+}
+
+button {
+  background: #00c853;
+  color: white;
+  font-weight: bold;
+}
+
+button:last-of-type {
+  background: #d50000;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li {
+  background: #222;
+  margin-top: 5px;
+  padding: 10px;
+  border-radius: 6px;
+}
