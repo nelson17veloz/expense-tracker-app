@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  />
   <title>Expense Tracker</title>
   <link rel="stylesheet" href="style.css" />
 
@@ -11,59 +14,80 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 </head>
 <body>
-  <div class="app">
-    <div class="top-card">
-      <div class="brand">
-        <img src="Logo.PNG" alt="App Logo" class="logo" />
+  <div class="background-overlay"></div>
+
+  <main class="app-shell">
+    <section class="hero-card">
+      <div class="hero-top">
         <div>
-          <p class="mini-title">Personal Finance</p>
+          <p class="eyebrow">Personal Finance</p>
           <h1>Expense Tracker</h1>
+          <p class="hero-subtext">Track income and spending in one place.</p>
         </div>
       </div>
 
-      <div class="balance-card">
+      <div class="balance-panel">
         <p class="balance-label">Current Balance</p>
         <h2 id="balance">$0.00</h2>
       </div>
 
       <div class="summary-grid">
         <div class="summary-box income-box">
-          <p>Income</p>
-          <h3>$<span id="income">0.00</span></h3>
+          <span class="summary-title">Income</span>
+          <strong>$<span id="income">0.00</span></strong>
         </div>
+
         <div class="summary-box expense-box">
-          <p>Expenses</p>
-          <h3>$<span id="expenses">0.00</span></h3>
+          <span class="summary-title">Expenses</span>
+          <strong>$<span id="expenses">0.00</span></strong>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="form-card">
-      <h3>Add Transaction</h3>
+    <section class="card form-card">
+      <div class="section-header">
+        <h3>Add Transaction</h3>
+      </div>
 
       <div class="input-group">
         <label for="desc">Description</label>
-        <input type="text" id="desc" placeholder="Ex: Paycheck, Rent, Food" />
+        <input
+          type="text"
+          id="desc"
+          placeholder="Paycheck, Groceries, Gas..."
+          maxlength="60"
+        />
       </div>
 
       <div class="input-group">
         <label for="amount">Amount</label>
-        <input type="number" id="amount" placeholder="Enter amount" inputmode="decimal" />
+        <input
+          type="number"
+          id="amount"
+          placeholder="0.00"
+          inputmode="decimal"
+          step="0.01"
+        />
       </div>
 
       <div class="action-row">
-        <button class="income-main-btn" onclick="addIncome()">Add Income</button>
-        <button class="expense-main-btn" onclick="addExpense()">Add Expense</button>
+        <button class="main-btn income-main-btn" onclick="addIncome()">
+          Add Income
+        </button>
+        <button class="main-btn expense-main-btn" onclick="addExpense()">
+          Add Expense
+        </button>
       </div>
-    </div>
+    </section>
 
-    <div class="list-card">
-      <div class="list-header">
+    <section class="card list-card">
+      <div class="section-header">
         <h3>Transactions</h3>
       </div>
+
       <ul id="list"></ul>
-    </div>
-  </div>
+    </section>
+  </main>
 
   <script src="app.js"></script>
 </body>

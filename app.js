@@ -32,14 +32,22 @@ function clearInputs() {
   document.getElementById("amount").value = "";
 }
 
-function validateTransaction(desc, amount) {
-  if (!desc.trim()) {
+function validateTransaction(desc, amountValue) {
+  const cleanDesc = desc.trim();
+  const numericAmount = Number(amountValue);
+
+  if (!cleanDesc) {
     alert("Please enter a description.");
     return false;
   }
 
-  if (amount === "" || isNaN(Number(amount))) {
+  if (amountValue === "" || Number.isNaN(numericAmount)) {
     alert("Please enter a valid amount.");
+    return false;
+  }
+
+  if (numericAmount < 0) {
+    alert("Please enter a positive amount.");
     return false;
   }
 
@@ -166,20 +174,22 @@ function updateUI() {
     list.innerHTML = `<li class="empty-state">No transactions yet.</li>`;
   }
 
-  transactions.forEach((t) => {
+  transactions.forEach((transaction) => {
     const li = document.createElement("li");
-    li.className = `transaction-item ${t.type === "Income" ? "income" : "expense"}`;
+    li.className = `transaction-item ${
+      transaction.type === "Income" ? "income" : "expense"
+    }`;
 
     const left = document.createElement("div");
     left.className = "transaction-left";
 
     const title = document.createElement("p");
     title.className = "transaction-title";
-    title.textContent = t.desc;
+    title.textContent = transaction.desc;
 
     const meta = document.createElement("p");
     meta.className = "transaction-meta";
-    meta.textContent = `${t.type} • ${formatDate(t.timestamp)}`;
+    meta.textContent = `${transaction.type} • ${formatDate(transaction.timestamp)}`;
 
     left.appendChild(title);
     left.appendChild(meta);
@@ -188,23 +198,27 @@ function updateUI() {
     right.className = "transaction-right";
 
     const amount = document.createElement("span");
-    amount.className = `transaction-amount ${t.type === "Income" ? "income-text" : "expense-text"}`;
-    amount.textContent = `${t.type === "Income" ? "+" : "-"}$${formatMoney(t.amount)}`;
+    amount.className = `transaction-amount ${
+      transaction.type === "Income" ? "income-text" : "expense-text"
+    }`;
+    amount.textContent = `${transaction.type === "Income" ? "+" : "-"}$${formatMoney(transaction.amount)}`;
 
     const editBtn = document.createElement("button");
-    editBtn.textContent = "✏️";
     editBtn.className = "small-btn edit-btn";
+    editBtn.textContent = "✏️";
+    editBtn.setAttribute("aria-label", "Edit transaction");
     editBtn.onclick = () => {
-      editTransaction(t.id, t.desc, t.amount);
+      editTransaction(transaction.id, transaction.desc, transaction.amount);
     };
 
     const deleteBtn = document.createElement("button");
-    deleteBtn.textContent = "🗑️";
     deleteBtn.className = "small-btn delete-btn";
+    deleteBtn.textContent = "🗑️";
+    deleteBtn.setAttribute("aria-label", "Delete transaction");
     deleteBtn.onclick = () => {
       const confirmed = confirm("Delete this transaction?");
       if (confirmed) {
-        deleteTransaction(t.id);
+        deleteTransaction(transaction.id);
       }
     };
 
@@ -217,12 +231,12 @@ function updateUI() {
 
     list.appendChild(li);
 
-    if (t.type === "Income") {
-      balance += Number(t.amount);
-      income += Number(t.amount);
+    if (transaction.type === "Income") {
+      balance += Number(transaction.amount);
+      income += Number(transaction.amount);
     } else {
-      balance -= Number(t.amount);
-      expenses += Number(t.amount);
+      balance -= Number(transaction.amount);
+      expenses += Number(transaction.amount);
     }
   });
 
