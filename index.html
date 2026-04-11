@@ -9,191 +9,404 @@
   <title>Expense Tracker</title>
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Firebase v8 -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.min.js"></script>
 </head>
-<body>
+<body data-theme="dark">
   <div class="background-overlay"></div>
 
+  <div id="toast" class="toast hidden">
+    <span id="toastMessage">Transaction deleted.</span>
+    <button id="undoDeleteBtn" type="button">Undo</button>
+  </div>
+
   <main class="app-shell">
-    <section class="hero-card">
-      <div class="hero-top">
-        <div>
-          <p class="eyebrow">Personal Finance</p>
-          <h1>Expense Tracker</h1>
-          <p class="hero-subtext">Track income and spending in one place.</p>
-        </div>
-      </div>
+    <div class="app-layout">
+      <section class="main-column">
+        <section class="hero-card">
+          <div class="hero-top">
+            <div>
+              <p class="eyebrow">Personal Finance</p>
+              <h1>Expense Tracker</h1>
+              <p class="hero-subtext">Track income, expenses, budgets, and trends in one place.</p>
+            </div>
 
-      <div class="balance-panel">
-        <p class="balance-label">Current Balance</p>
-        <h2 id="balance">$0.00</h2>
-      </div>
+            <button class="theme-toggle-btn" id="themeToggleBtn" type="button">
+              Toggle Theme
+            </button>
+          </div>
 
-      <div class="summary-grid">
-        <div class="summary-box income-box">
-          <span class="summary-title">Income</span>
-          <strong>$<span id="income">0.00</span></strong>
-        </div>
+          <div class="balance-panel">
+            <p class="balance-label">Current Balance</p>
+            <h2 id="balance">$0.00</h2>
+          </div>
 
-        <div class="summary-box expense-box">
-          <span class="summary-title">Expenses</span>
-          <strong>$<span id="expenses">0.00</span></strong>
-        </div>
-      </div>
-    </section>
+          <div class="summary-grid">
+            <div class="summary-box income-box">
+              <span class="summary-title">Income</span>
+              <strong>$<span id="income">0.00</span></strong>
+            </div>
 
-    <section class="card form-card">
-      <div class="section-header">
-        <h3>Add Transaction</h3>
-      </div>
+            <div class="summary-box expense-box">
+              <span class="summary-title">Expenses</span>
+              <strong>$<span id="expenses">0.00</span></strong>
+            </div>
+          </div>
+        </section>
 
-      <div class="input-group">
-        <label for="desc">Description</label>
-        <input
-          type="text"
-          id="desc"
-          placeholder="Paycheck, Groceries, Gas..."
-          maxlength="60"
-        />
-      </div>
-
-      <div class="input-group">
-        <label for="amount">Amount</label>
-        <input
-          type="number"
-          id="amount"
-          placeholder="0.00"
-          inputmode="decimal"
-          step="0.01"
-        />
-      </div>
-
-      <div class="action-row">
-        <button class="main-btn income-main-btn" onclick="addIncome()">
-          Add Income
-        </button>
-        <button class="main-btn expense-main-btn" onclick="addExpense()">
-          Add Expense
-        </button>
-      </div>
-    </section>
-
-    <section class="card collapsible-card">
-      <button class="collapse-toggle" type="button" onclick="toggleSection('rangeSummaryContent', this)">
-        <span>Custom Range Summary</span>
-        <span class="collapse-icon">⌄</span>
-      </button>
-
-      <div class="collapse-content" id="rangeSummaryContent">
-        <div class="date-filter-grid">
-          <div class="input-group">
-            <label for="rangeStart">Start Date</label>
-            <input type="date" id="rangeStart" />
+        <section class="card form-card">
+          <div class="section-header">
+            <h3>Add Transaction</h3>
           </div>
 
           <div class="input-group">
-            <label for="rangeEnd">End Date</label>
-            <input type="date" id="rangeEnd" />
+            <label for="desc">Description</label>
+            <input type="text" id="desc" placeholder="Paycheck, Groceries, Gas..." maxlength="60" />
           </div>
-        </div>
 
-        <div class="filter-btn-row">
-          <button class="secondary-btn" onclick="applyRangeSummary()">
-            Apply Range
+          <div class="two-column-grid">
+            <div class="input-group">
+              <label for="amount">Amount</label>
+              <input type="number" id="amount" placeholder="0.00" inputmode="decimal" step="0.01" />
+            </div>
+
+            <div class="input-group">
+              <label for="category">Category</label>
+              <select id="category">
+                <option value="General">General</option>
+                <option value="Food">Food</option>
+                <option value="Bills">Bills</option>
+                <option value="Gas">Gas</option>
+                <option value="Rent">Rent</option>
+                <option value="Entertainment">Entertainment</option>
+                <option value="Shopping">Shopping</option>
+                <option value="Salary">Salary</option>
+                <option value="Freelance">Freelance</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="two-column-grid">
+            <div class="input-group">
+              <label for="transactionDate">Date</label>
+              <input type="date" id="transactionDate" />
+            </div>
+
+            <div class="input-group">
+              <label for="isRecurring">Recurring</label>
+              <select id="isRecurring">
+                <option value="false">No</option>
+                <option value="true">Yes</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label for="notes">Notes</label>
+            <textarea id="notes" rows="3" placeholder="Optional notes..."></textarea>
+          </div>
+
+          <div class="action-row">
+            <button class="main-btn income-main-btn" type="button" onclick="addIncome()">Add Income</button>
+            <button class="main-btn expense-main-btn" type="button" onclick="addExpense()">Add Expense</button>
+          </div>
+        </section>
+
+        <section class="card controls-card">
+          <div class="section-header">
+            <h3>Search & Filters</h3>
+          </div>
+
+          <div class="input-group">
+            <label for="searchInput">Search</label>
+            <input type="text" id="searchInput" placeholder="Search description, notes, category..." />
+          </div>
+
+          <div class="three-column-grid">
+            <div class="input-group">
+              <label for="filterType">Type</label>
+              <select id="filterType">
+                <option value="All">All</option>
+                <option value="Income">Income</option>
+                <option value="Expense">Expense</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="filterCategory">Category</label>
+              <select id="filterCategory">
+                <option value="All">All</option>
+                <option value="General">General</option>
+                <option value="Food">Food</option>
+                <option value="Bills">Bills</option>
+                <option value="Gas">Gas</option>
+                <option value="Rent">Rent</option>
+                <option value="Entertainment">Entertainment</option>
+                <option value="Shopping">Shopping</option>
+                <option value="Salary">Salary</option>
+                <option value="Freelance">Freelance</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="sortOption">Sort</label>
+              <select id="sortOption">
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="highest">Highest Amount</option>
+                <option value="lowest">Lowest Amount</option>
+                <option value="az">A-Z</option>
+                <option value="za">Z-A</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="button-row">
+            <button class="secondary-btn" type="button" id="clearFiltersBtn">Clear Filters</button>
+            <button class="secondary-btn secondary-btn-muted" type="button" id="exportCsvBtn">Export CSV</button>
+          </div>
+        </section>
+
+        <section class="card budget-card">
+          <div class="section-header">
+            <h3>Budget Goals</h3>
+          </div>
+
+          <div class="two-column-grid">
+            <div class="input-group">
+              <label for="budgetCategory">Category</label>
+              <select id="budgetCategory">
+                <option value="Food">Food</option>
+                <option value="Bills">Bills</option>
+                <option value="Gas">Gas</option>
+                <option value="Rent">Rent</option>
+                <option value="Entertainment">Entertainment</option>
+                <option value="Shopping">Shopping</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="budgetAmount">Budget Amount</label>
+              <input type="number" id="budgetAmount" placeholder="0.00" step="0.01" />
+            </div>
+          </div>
+
+          <div class="button-row">
+            <button class="secondary-btn" type="button" id="saveBudgetBtn">Save Budget</button>
+          </div>
+
+          <div id="budgetList" class="stack-list"></div>
+        </section>
+
+        <section class="card collapsible-card">
+          <button class="collapse-toggle" type="button" onclick="toggleSection('rangeSummaryContent', this)">
+            <span>Custom Range Summary</span>
+            <span class="collapse-icon">⌄</span>
           </button>
-          <button class="secondary-btn secondary-btn-muted" onclick="resetRangeSummary()">
-            Reset
+
+          <div class="collapse-content" id="rangeSummaryContent">
+            <div class="date-filter-grid">
+              <div class="input-group">
+                <label for="rangeStart">Start Date</label>
+                <input type="date" id="rangeStart" />
+              </div>
+
+              <div class="input-group">
+                <label for="rangeEnd">End Date</label>
+                <input type="date" id="rangeEnd" />
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button class="secondary-btn" type="button" onclick="applyRangeSummary()">Apply Range</button>
+              <button class="secondary-btn secondary-btn-muted" type="button" onclick="resetRangeSummary()">Reset</button>
+            </div>
+
+            <div class="range-label" id="selectedRangeLabel">Showing all transactions</div>
+
+            <div class="monthly-grid">
+              <div class="mini-stat">
+                <span>Income</span>
+                <strong>$<span id="rangeIncome">0.00</span></strong>
+              </div>
+
+              <div class="mini-stat">
+                <span>Expenses</span>
+                <strong>$<span id="rangeExpenses">0.00</span></strong>
+              </div>
+
+              <div class="mini-stat">
+                <span>Net</span>
+                <strong id="rangeNet">$0.00</strong>
+              </div>
+
+              <div class="mini-stat wide-stat">
+                <span>Highest Income</span>
+                <strong id="rangeHighestIncome">None</strong>
+                <small id="rangeHighestIncomeDate">—</small>
+              </div>
+
+              <div class="mini-stat wide-stat">
+                <span>Highest Expense</span>
+                <strong id="rangeHighestExpense">None</strong>
+                <small id="rangeHighestExpenseDate">—</small>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card collapsible-card">
+          <button class="collapse-toggle" type="button" onclick="toggleSection('monthlySummaryContent', this)">
+            <span>Monthly Summary</span>
+            <span class="collapse-icon">⌄</span>
           </button>
-        </div>
 
-        <div class="range-label" id="selectedRangeLabel">Showing all transactions</div>
+          <div class="collapse-content" id="monthlySummaryContent">
+            <div class="input-group">
+              <label for="monthPicker">Choose Month</label>
+              <input type="month" id="monthPicker" />
+            </div>
 
-        <div class="monthly-grid">
-          <div class="mini-stat">
-            <span>Income</span>
-            <strong>$<span id="rangeIncome">0.00</span></strong>
+            <div class="month-label" id="selectedMonthLabel">Current month</div>
+
+            <div class="monthly-grid">
+              <div class="mini-stat">
+                <span>Income</span>
+                <strong>$<span id="monthIncome">0.00</span></strong>
+              </div>
+
+              <div class="mini-stat">
+                <span>Expenses</span>
+                <strong>$<span id="monthExpenses">0.00</span></strong>
+              </div>
+
+              <div class="mini-stat">
+                <span>Net</span>
+                <strong id="monthNet">$0.00</strong>
+              </div>
+
+              <div class="mini-stat wide-stat">
+                <span>Highest Income</span>
+                <strong id="monthHighestIncome">None</strong>
+                <small id="monthHighestIncomeDate">—</small>
+              </div>
+
+              <div class="mini-stat wide-stat">
+                <span>Highest Expense</span>
+                <strong id="monthHighestExpense">None</strong>
+                <small id="monthHighestExpenseDate">—</small>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card dashboard-card">
+          <div class="section-header">
+            <h3>Charts</h3>
           </div>
 
-          <div class="mini-stat">
-            <span>Expenses</span>
-            <strong>$<span id="rangeExpenses">0.00</span></strong>
+          <div class="chart-card">
+            <p class="chart-title">Monthly Totals</p>
+            <div class="chart-wrap">
+              <canvas id="monthlyTrendChart"></canvas>
+            </div>
           </div>
 
-          <div class="mini-stat">
-            <span>Net</span>
-            <strong id="rangeNet">$0.00</strong>
+          <div class="chart-card">
+            <p class="chart-title">Expenses By Category</p>
+            <div class="chart-wrap pie-chart-wrap">
+              <canvas id="categoryExpenseChart"></canvas>
+            </div>
           </div>
+        </section>
+      </section>
 
-          <div class="mini-stat wide-stat">
-            <span>Highest Income</span>
-            <strong id="rangeHighestIncome">None</strong>
-            <small id="rangeHighestIncomeDate">—</small>
+      <aside class="side-column">
+        <section class="card dashboard-card sticky-panel">
+          <div class="section-header">
+            <h3>Category Totals</h3>
           </div>
+          <div id="categoryTotalsList" class="stack-list"></div>
+        </section>
 
-          <div class="mini-stat wide-stat">
-            <span>Highest Expense</span>
-            <strong id="rangeHighestExpense">None</strong>
-            <small id="rangeHighestExpenseDate">—</small>
+        <section class="card list-card sticky-panel">
+          <div class="section-header">
+            <h3>Transactions</h3>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="card collapsible-card">
-      <button class="collapse-toggle" type="button" onclick="toggleSection('monthlySummaryContent', this)">
-        <span>Monthly Summary</span>
-        <span class="collapse-icon">⌄</span>
-      </button>
-
-      <div class="collapse-content" id="monthlySummaryContent">
-        <div class="input-group">
-          <label for="monthPicker">Choose Month</label>
-          <input type="month" id="monthPicker" />
-        </div>
-
-        <div class="month-label" id="selectedMonthLabel">Current month</div>
-
-        <div class="monthly-grid">
-          <div class="mini-stat">
-            <span>Income</span>
-            <strong>$<span id="monthIncome">0.00</span></strong>
-          </div>
-
-          <div class="mini-stat">
-            <span>Expenses</span>
-            <strong>$<span id="monthExpenses">0.00</span></strong>
-          </div>
-
-          <div class="mini-stat">
-            <span>Net</span>
-            <strong id="monthNet">$0.00</strong>
-          </div>
-
-          <div class="mini-stat wide-stat">
-            <span>Highest Income</span>
-            <strong id="monthHighestIncome">None</strong>
-            <small id="monthHighestIncomeDate">—</small>
-          </div>
-
-          <div class="mini-stat wide-stat">
-            <span>Highest Expense</span>
-            <strong id="monthHighestExpense">None</strong>
-            <small id="monthHighestExpenseDate">—</small>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="card list-card">
-      <div class="section-header">
-        <h3>Transactions</h3>
-      </div>
-
-      <ul id="list"></ul>
-    </section>
+          <ul id="list"></ul>
+        </section>
+      </aside>
+    </div>
   </main>
+
+  <div class="modal hidden" id="editModal">
+    <div class="modal-backdrop" id="editModalBackdrop"></div>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h3>Edit Transaction</h3>
+        <button class="modal-close-btn" type="button" id="closeEditModalBtn">✕</button>
+      </div>
+
+      <input type="hidden" id="editId" />
+
+      <div class="input-group">
+        <label for="editDesc">Description</label>
+        <input type="text" id="editDesc" maxlength="60" />
+      </div>
+
+      <div class="two-column-grid">
+        <div class="input-group">
+          <label for="editAmount">Amount</label>
+          <input type="number" id="editAmount" step="0.01" />
+        </div>
+
+        <div class="input-group">
+          <label for="editCategory">Category</label>
+          <select id="editCategory">
+            <option value="General">General</option>
+            <option value="Food">Food</option>
+            <option value="Bills">Bills</option>
+            <option value="Gas">Gas</option>
+            <option value="Rent">Rent</option>
+            <option value="Entertainment">Entertainment</option>
+            <option value="Shopping">Shopping</option>
+            <option value="Salary">Salary</option>
+            <option value="Freelance">Freelance</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="two-column-grid">
+        <div class="input-group">
+          <label for="editDate">Date</label>
+          <input type="date" id="editDate" />
+        </div>
+
+        <div class="input-group">
+          <label for="editRecurring">Recurring</label>
+          <select id="editRecurring">
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="input-group">
+        <label for="editNotes">Notes</label>
+        <textarea id="editNotes" rows="3"></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button class="secondary-btn secondary-btn-muted" type="button" id="cancelEditBtn">Cancel</button>
+        <button class="secondary-btn" type="button" id="saveEditBtn">Save Changes</button>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
