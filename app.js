@@ -18,6 +18,246 @@ let deletedTransactionCache = null;
 let deleteUndoTimer = null;
 let monthlyTrendChart = null;
 let categoryExpenseChart = null;
+let currentLanguage = localStorage.getItem("language") || "en";
+
+const translations = {
+  en: {
+    eyebrow: "Personal Finance",
+    appTitle: "Expense Tracker",
+    heroSubtitle: "Track income, expenses, budgets, and trends in one place.",
+    toggleTheme: "Toggle Theme",
+    currentBalance: "Current Balance",
+    income: "Income",
+    expenses: "Expenses",
+    expense: "Expense",
+    addTransaction: "Add Transaction",
+    description: "Description",
+    amount: "Amount",
+    category: "Category",
+    date: "Date",
+    recurring: "Recurring",
+    yes: "Yes",
+    no: "No",
+    notes: "Notes",
+    addIncome: "Add Income",
+    addExpense: "Add Expense",
+    searchFilters: "Search & Filters",
+    search: "Search",
+    type: "Type",
+    all: "All",
+    sort: "Sort",
+    newest: "Newest",
+    oldest: "Oldest",
+    highestAmount: "Highest Amount",
+    lowestAmount: "Lowest Amount",
+    az: "A-Z",
+    za: "Z-A",
+    clearFilters: "Clear Filters",
+    exportCsv: "Export CSV",
+    budgetGoals: "Budget Goals",
+    budgetAmount: "Budget Amount",
+    saveBudget: "Save Budget",
+    customRangeSummary: "Custom Range Summary",
+    startDate: "Start Date",
+    endDate: "End Date",
+    applyRange: "Apply Range",
+    reset: "Reset",
+    net: "Net",
+    highestIncome: "Highest Income",
+    highestExpense: "Highest Expense",
+    monthlySummary: "Monthly Summary",
+    chooseMonth: "Choose Month",
+    charts: "Charts",
+    monthlyTotals: "Monthly Totals",
+    expensesByCategory: "Expenses By Category",
+    categoryTotals: "Category Totals",
+    transactions: "Transactions",
+    editTransaction: "Edit Transaction",
+    cancel: "Cancel",
+    saveChanges: "Save Changes",
+    delete: "Delete",
+    remove: "Remove",
+    showingAllTransactions: "Showing all transactions",
+    from: "From",
+    upTo: "Up to",
+    to: "to",
+    currentMonth: "Current month",
+    noIncomeFound: "No income found",
+    noExpenseFound: "No expense found",
+    noBudgetGoals: "No budget goals set yet.",
+    noCategoryTotals: "No category totals yet.",
+    noTransactionsFound: "No transactions found.",
+    transactionDeleted: "Transaction deleted.",
+    undo: "Undo",
+    confirmDelete: "Delete this transaction?",
+    invalidDescription: "Please enter a description.",
+    invalidAmount: "Please enter a valid amount.",
+    positiveAmount: "Please enter a positive amount.",
+    chooseDate: "Please choose a date.",
+    invalidRange: "Start date cannot be after end date.",
+    addError: "There was a problem adding the transaction.",
+    loadError: "There was a problem loading your transactions.",
+    updateError: "There was a problem updating the transaction.",
+    deleteError: "There was a problem deleting the transaction.",
+    restoreError: "There was a problem restoring the transaction.",
+    budgetInvalid: "Please enter a valid budget amount.",
+    recurringLabel: "Recurring",
+    general: "General",
+    food: "Food",
+    bills: "Bills",
+    gas: "Gas",
+    rent: "Rent",
+    entertainment: "Entertainment",
+    shopping: "Shopping",
+    salary: "Salary",
+    Studio: "Studio",
+    other: "Other",
+    spent: "Spent",
+    remaining: "Remaining",
+    overBudgetBy: "Over budget by"
+  },
+  es: {
+    eyebrow: "Finanzas Personales",
+    appTitle: "Control de Gastos",
+    heroSubtitle: "Controla ingresos, gastos, presupuestos y tendencias en un solo lugar.",
+    toggleTheme: "Cambiar Tema",
+    currentBalance: "Balance Actual",
+    income: "Ingresos",
+    expenses: "Gastos",
+    expense: "Gasto",
+    addTransaction: "Agregar Movimiento",
+    description: "Descripción",
+    amount: "Cantidad",
+    category: "Categoría",
+    date: "Fecha",
+    recurring: "Recurrente",
+    yes: "Sí",
+    no: "No",
+    notes: "Notas",
+    addIncome: "Agregar Ingreso",
+    addExpense: "Agregar Gasto",
+    searchFilters: "Búsqueda y Filtros",
+    search: "Buscar",
+    type: "Tipo",
+    all: "Todos",
+    sort: "Ordenar",
+    newest: "Más Reciente",
+    oldest: "Más Antiguo",
+    highestAmount: "Cantidad Más Alta",
+    lowestAmount: "Cantidad Más Baja",
+    az: "A-Z",
+    za: "Z-A",
+    clearFilters: "Limpiar Filtros",
+    exportCsv: "Exportar CSV",
+    budgetGoals: "Metas de Presupuesto",
+    budgetAmount: "Cantidad del Presupuesto",
+    saveBudget: "Guardar Presupuesto",
+    customRangeSummary: "Resumen por Rango",
+    startDate: "Fecha Inicial",
+    endDate: "Fecha Final",
+    applyRange: "Aplicar Rango",
+    reset: "Restablecer",
+    net: "Neto",
+    highestIncome: "Ingreso Más Alto",
+    highestExpense: "Gasto Más Alto",
+    monthlySummary: "Resumen Mensual",
+    chooseMonth: "Elegir Mes",
+    charts: "Gráficas",
+    monthlyTotals: "Totales Mensuales",
+    expensesByCategory: "Gastos por Categoría",
+    categoryTotals: "Totales por Categoría",
+    transactions: "Movimientos",
+    editTransaction: "Editar Movimiento",
+    cancel: "Cancelar",
+    saveChanges: "Guardar Cambios",
+    delete: "Eliminar",
+    remove: "Quitar",
+    showingAllTransactions: "Mostrando todos los movimientos",
+    from: "Desde",
+    upTo: "Hasta",
+    to: "a",
+    currentMonth: "Mes actual",
+    noIncomeFound: "No se encontraron ingresos",
+    noExpenseFound: "No se encontraron gastos",
+    noBudgetGoals: "Todavía no hay presupuestos guardados.",
+    noCategoryTotals: "Todavía no hay totales por categoría.",
+    noTransactionsFound: "No se encontraron movimientos.",
+    transactionDeleted: "Movimiento eliminado.",
+    undo: "Deshacer",
+    confirmDelete: "¿Eliminar este movimiento?",
+    invalidDescription: "Por favor escribe una descripción.",
+    invalidAmount: "Por favor escribe una cantidad válida.",
+    positiveAmount: "Por favor escribe una cantidad positiva.",
+    chooseDate: "Por favor elige una fecha.",
+    invalidRange: "La fecha inicial no puede ser después de la final.",
+    addError: "Hubo un problema al agregar el movimiento.",
+    loadError: "Hubo un problema al cargar tus movimientos.",
+    updateError: "Hubo un problema al actualizar el movimiento.",
+    deleteError: "Hubo un problema al eliminar el movimiento.",
+    restoreError: "Hubo un problema al restaurar el movimiento.",
+    budgetInvalid: "Por favor escribe una cantidad válida para el presupuesto.",
+    recurringLabel: "Recurrente",
+    general: "General",
+    food: "Comida",
+    bills: "Facturas",
+    gas: "Gasolina",
+    rent: "Renta",
+    entertainment: "Entretenimiento",
+    shopping: "Compras",
+    salary: "Salario",
+    Studio: "Studio",
+    other: "Otro",
+    spent: "Gastado",
+    remaining: "Restante",
+    overBudgetBy: "Pasado del presupuesto por"
+  }
+};
+
+const categoryTranslationKeys = {
+  General: "general",
+  Food: "food",
+  Bills: "bills",
+  Gas: "gas",
+  Rent: "rent",
+  Entertainment: "entertainment",
+  Shopping: "shopping",
+  Salary: "salary",
+  Studio: "studio",
+  Other: "other"
+};
+
+function t(key) {
+  return translations[currentLanguage][key] || key;
+}
+
+function translateCategory(category) {
+  const key = categoryTranslationKeys[category] || null;
+  return key ? t(key) : category;
+}
+
+function setPlaceholders() {
+  document.getElementById("desc").placeholder =
+    currentLanguage === "en" ? "Paycheck, Groceries, Gas..." : "Cheque, Compra, Gasolina...";
+  document.getElementById("amount").placeholder = "0.00";
+  document.getElementById("notes").placeholder =
+    currentLanguage === "en" ? "Optional notes..." : "Notas opcionales...";
+  document.getElementById("searchInput").placeholder =
+    currentLanguage === "en"
+      ? "Search description, notes, category..."
+      : "Buscar descripción, notas, categoría...";
+  document.getElementById("budgetAmount").placeholder = "0.00";
+}
+
+function translateStaticText() {
+  document.documentElement.lang = currentLanguage;
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    el.textContent = t(key);
+  });
+  document.getElementById("undoDeleteBtn").textContent = t("undo");
+  document.getElementById("languageToggleBtn").textContent = currentLanguage === "en" ? "ES" : "EN";
+  setPlaceholders();
+}
 
 function formatMoney(value) {
   return Number(value || 0).toFixed(2);
@@ -25,7 +265,9 @@ function formatMoney(value) {
 
 function formatDate(timestamp) {
   if (!timestamp) return "No date";
-  return new Date(Number(timestamp)).toLocaleDateString();
+  return new Date(Number(timestamp)).toLocaleDateString(
+    currentLanguage === "es" ? "es-ES" : undefined
+  );
 }
 
 function formatDateForInput(timestamp) {
@@ -37,12 +279,12 @@ function formatDateForInput(timestamp) {
 }
 
 function formatMonthLabel(monthValue) {
-  if (!monthValue) return "Current month";
+  if (!monthValue) return t("currentMonth");
   const [year, month] = monthValue.split("-");
-  return new Date(Number(year), Number(month) - 1, 1).toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric"
-  });
+  return new Date(Number(year), Number(month) - 1, 1).toLocaleDateString(
+    currentLanguage === "es" ? "es-ES" : undefined,
+    { month: "long", year: "numeric" }
+  );
 }
 
 function getCurrentMonthValue() {
@@ -98,22 +340,22 @@ function validateTransaction(desc, amountValue, dateValue) {
   const numericAmount = Number(amountValue);
 
   if (!cleanDesc) {
-    alert("Please enter a description.");
+    alert(t("invalidDescription"));
     return false;
   }
 
   if (amountValue === "" || Number.isNaN(numericAmount)) {
-    alert("Please enter a valid amount.");
+    alert(t("invalidAmount"));
     return false;
   }
 
   if (numericAmount < 0) {
-    alert("Please enter a positive amount.");
+    alert(t("positiveAmount"));
     return false;
   }
 
   if (!dateValue) {
-    alert("Please choose a date.");
+    alert(t("chooseDate"));
     return false;
   }
 
@@ -143,7 +385,7 @@ function loadTransactions() {
       },
       (error) => {
         console.error("Error loading transactions:", error);
-        alert("There was a problem loading your transactions.");
+        alert(t("loadError"));
       }
     );
 }
@@ -174,7 +416,7 @@ function addTransaction(type) {
     })
     .catch((error) => {
       console.error("Error adding transaction:", error);
-      alert("There was a problem adding the transaction.");
+      alert(t("addError"));
     });
 }
 
@@ -211,11 +453,11 @@ function deleteTransaction(id) {
     .doc(id)
     .delete()
     .then(() => {
-      showUndoToast("Transaction deleted.");
+      showUndoToast(t("transactionDeleted"));
     })
     .catch((error) => {
       console.error("Error deleting transaction:", error);
-      alert("There was a problem deleting the transaction.");
+      alert(t("deleteError"));
     });
 }
 
@@ -233,7 +475,7 @@ function undoDelete() {
     })
     .catch((error) => {
       console.error("Error restoring transaction:", error);
-      alert("There was a problem restoring the transaction.");
+      alert(t("restoreError"));
     });
 }
 
@@ -278,7 +520,7 @@ function saveEditTransaction() {
     })
     .catch((error) => {
       console.error("Error updating transaction:", error);
-      alert("There was a problem updating the transaction.");
+      alert(t("updateError"));
     });
 }
 
@@ -386,7 +628,7 @@ function applySummaryToElements(summary, ids) {
     highestIncomeDateEl.textContent = formatDate(summary.highestIncome.timestamp);
   } else {
     highestIncomeEl.textContent = "None";
-    highestIncomeDateEl.textContent = "No income found";
+    highestIncomeDateEl.textContent = t("noIncomeFound");
   }
 
   if (summary.highestExpense) {
@@ -394,7 +636,7 @@ function applySummaryToElements(summary, ids) {
     highestExpenseDateEl.textContent = formatDate(summary.highestExpense.timestamp);
   } else {
     highestExpenseEl.textContent = "None";
-    highestExpenseDateEl.textContent = "No expense found";
+    highestExpenseDateEl.textContent = t("noExpenseFound");
   }
 }
 
@@ -403,7 +645,7 @@ function applyRangeSummary() {
   const endValue = document.getElementById("rangeEnd").value;
 
   if (startValue && endValue && getStartOfDay(startValue) > getEndOfDay(endValue)) {
-    alert("Start date cannot be after end date.");
+    alert(t("invalidRange"));
     return;
   }
 
@@ -425,13 +667,13 @@ function updateRangeSummary() {
   const summary = calculateSummaryData(getTransactionsInRange(activeRangeStart, activeRangeEnd));
 
   if (activeRangeStart && activeRangeEnd) {
-    labelEl.textContent = `${activeRangeStart} to ${activeRangeEnd}`;
+    labelEl.textContent = `${activeRangeStart} ${t("to")} ${activeRangeEnd}`;
   } else if (activeRangeStart) {
-    labelEl.textContent = `From ${activeRangeStart}`;
+    labelEl.textContent = `${t("from")} ${activeRangeStart}`;
   } else if (activeRangeEnd) {
-    labelEl.textContent = `Up to ${activeRangeEnd}`;
+    labelEl.textContent = `${t("upTo")} ${activeRangeEnd}`;
   } else {
-    labelEl.textContent = "Showing all transactions";
+    labelEl.textContent = t("showingAllTransactions");
   }
 
   applySummaryToElements(summary, {
@@ -488,7 +730,7 @@ function renderBudgetList() {
   const categories = Object.keys(budgets);
 
   if (categories.length === 0) {
-    budgetList.innerHTML = `<div class="empty-state">No budget goals set yet.</div>`;
+    budgetList.innerHTML = `<div class="empty-state">${t("noBudgetGoals")}</div>`;
     return;
   }
 
@@ -505,14 +747,14 @@ function renderBudgetList() {
 
     const title = document.createElement("div");
     title.className = "stack-item-title";
-    title.textContent = `${category} — Budget $${formatMoney(budgetAmount)}`;
+    title.textContent = `${translateCategory(category)} — $${formatMoney(budgetAmount)}`;
 
     const subtitle = document.createElement("div");
     subtitle.className = "stack-item-subtitle";
     subtitle.textContent =
       remaining >= 0
-        ? `Spent $${formatMoney(spent)} • Remaining $${formatMoney(remaining)}`
-        : `Spent $${formatMoney(spent)} • Over budget by $${formatMoney(Math.abs(remaining))}`;
+        ? `${t("spent")} $${formatMoney(spent)} • ${t("remaining")} $${formatMoney(remaining)}`
+        : `${t("spent")} $${formatMoney(spent)} • ${t("overBudgetBy")} $${formatMoney(Math.abs(remaining))}`;
 
     main.appendChild(title);
     main.appendChild(subtitle);
@@ -520,7 +762,7 @@ function renderBudgetList() {
     const removeBtn = document.createElement("button");
     removeBtn.className = "stack-item-btn";
     removeBtn.type = "button";
-    removeBtn.textContent = "Remove";
+    removeBtn.textContent = t("remove");
     removeBtn.onclick = () => {
       delete budgets[category];
       localStorage.setItem("budgets", JSON.stringify(budgets));
@@ -552,7 +794,7 @@ function renderCategoryTotals() {
   const categories = Object.keys(totals).sort();
 
   if (categories.length === 0) {
-    container.innerHTML = `<div class="empty-state">No category totals yet.</div>`;
+    container.innerHTML = `<div class="empty-state">${t("noCategoryTotals")}</div>`;
     return;
   }
 
@@ -565,11 +807,11 @@ function renderCategoryTotals() {
 
     const title = document.createElement("div");
     title.className = "stack-item-title";
-    title.textContent = category;
+    title.textContent = translateCategory(category);
 
     const subtitle = document.createElement("div");
     subtitle.className = "stack-item-subtitle";
-    subtitle.textContent = `Income $${formatMoney(totals[category].income)} • Expense $${formatMoney(totals[category].expense)}`;
+    subtitle.textContent = `${t("income")} $${formatMoney(totals[category].income)} • ${t("expense")} $${formatMoney(totals[category].expense)}`;
 
     main.appendChild(title);
     main.appendChild(subtitle);
@@ -611,13 +853,13 @@ function renderMonthlyTrendChart() {
       labels,
       datasets: [
         {
-          label: "Income",
+          label: t("income"),
           data: incomeData,
           backgroundColor: colors.income,
           borderRadius: 10
         },
         {
-          label: "Expenses",
+          label: t("expenses"),
           data: expenseData,
           backgroundColor: colors.expense,
           borderRadius: 10
@@ -670,8 +912,8 @@ function renderCategoryExpenseChart() {
     }
   });
 
-  const labels = Object.keys(totals);
-  const data = labels.map((label) => totals[label]);
+  const labels = Object.keys(totals).map(translateCategory);
+  const data = Object.keys(totals).map((key) => totals[key]);
   const colors = getChartColors();
   const backgroundColors = labels.map((_, index) => colors.pie[index % colors.pie.length]);
 
@@ -709,7 +951,15 @@ function renderCategoryExpenseChart() {
 
 function exportCsv() {
   const rows = [
-    ["Type", "Description", "Amount", "Category", "Date", "Recurring", "Notes"]
+    [
+      t("type"),
+      t("description"),
+      t("amount"),
+      t("category"),
+      t("date"),
+      t("recurring"),
+      t("notes")
+    ]
   ];
 
   getFilteredTransactions().forEach((transaction) => {
@@ -717,9 +967,9 @@ function exportCsv() {
       transaction.type || "",
       transaction.desc || "",
       formatMoney(transaction.amount),
-      transaction.category || "",
+      translateCategory(transaction.category || ""),
       formatDate(transaction.timestamp),
-      transaction.recurring ? "Yes" : "No",
+      transaction.recurring ? t("yes") : t("no"),
       (transaction.notes || "").replace(/\n/g, " ")
     ]);
   });
@@ -732,7 +982,7 @@ function exportCsv() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "expense-tracker-export.csv";
+  link.download = currentLanguage === "es" ? "control-de-gastos.csv" : "expense-tracker-export.csv";
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -750,7 +1000,7 @@ function saveBudget() {
   const amountValue = document.getElementById("budgetAmount").value;
 
   if (amountValue === "" || Number.isNaN(Number(amountValue)) || Number(amountValue) < 0) {
-    alert("Please enter a valid budget amount.");
+    alert(t("budgetInvalid"));
     return;
   }
 
@@ -760,7 +1010,30 @@ function saveBudget() {
   renderBudgetList();
 }
 
+function refreshLanguageSensitiveSelects() {
+  Array.from(document.querySelectorAll("option")).forEach((option) => {
+    const value = option.value;
+    if (value in categoryTranslationKeys) {
+      option.textContent = translateCategory(value);
+    }
+    if (value === "All") option.textContent = t("all");
+    if (value === "Income") option.textContent = t("income");
+    if (value === "Expense") option.textContent = t("expense");
+    if (value === "false") option.textContent = t("no");
+    if (value === "true") option.textContent = t("yes");
+    if (value === "newest") option.textContent = t("newest");
+    if (value === "oldest") option.textContent = t("oldest");
+    if (value === "highest") option.textContent = t("highestAmount");
+    if (value === "lowest") option.textContent = t("lowestAmount");
+    if (value === "az") option.textContent = t("az");
+    if (value === "za") option.textContent = t("za");
+  });
+}
+
 function updateUI() {
+  translateStaticText();
+  refreshLanguageSensitiveSelects();
+
   const list = document.getElementById("list");
   list.innerHTML = "";
 
@@ -785,7 +1058,7 @@ function updateUI() {
   const filteredTransactions = getFilteredTransactions();
 
   if (filteredTransactions.length === 0) {
-    list.innerHTML = `<li class="empty-state">No transactions found.</li>`;
+    list.innerHTML = `<li class="empty-state">${t("noTransactionsFound")}</li>`;
   }
 
   filteredTransactions.forEach((transaction) => {
@@ -801,7 +1074,7 @@ function updateUI() {
 
     const meta = document.createElement("p");
     meta.className = "transaction-meta";
-    meta.textContent = `${transaction.type} • ${transaction.category || "General"} • ${formatDate(transaction.timestamp)}${transaction.recurring ? " • Recurring" : ""}`;
+    meta.textContent = `${transaction.type === "Income" ? t("income") : t("expense")} • ${translateCategory(transaction.category || "General")} • ${formatDate(transaction.timestamp)}${transaction.recurring ? ` • ${t("recurringLabel")}` : ""}`;
 
     left.appendChild(title);
     left.appendChild(meta);
@@ -831,7 +1104,7 @@ function updateUI() {
     deleteBtn.type = "button";
     deleteBtn.textContent = "🗑️";
     deleteBtn.onclick = () => {
-      const confirmed = confirm("Delete this transaction?");
+      const confirmed = confirm(t("confirmDelete"));
       if (confirmed) deleteTransaction(transaction.id);
     };
 
@@ -879,10 +1152,18 @@ document.addEventListener("DOMContentLoaded", () => {
     updateUI();
   });
 
+  document.getElementById("languageToggleBtn").addEventListener("click", () => {
+    currentLanguage = currentLanguage === "en" ? "es" : "en";
+    localStorage.setItem("language", currentLanguage);
+    updateUI();
+  });
+
   const savedTheme = localStorage.getItem("theme");
   if (savedTheme) {
     document.body.setAttribute("data-theme", savedTheme);
   }
 
+  translateStaticText();
+  refreshLanguageSensitiveSelects();
   loadTransactions();
 });
