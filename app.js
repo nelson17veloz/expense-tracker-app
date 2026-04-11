@@ -14,12 +14,11 @@ const db = firebase.firestore();
 let transactions = [];
 
 // ==========================
-// LOAD (REAL TIME)
+// LOAD TRANSACTIONS (REAL-TIME)
 // ==========================
-
 function loadTransactions() {
   db.collection("transactions")
-    .orderBy("timestamp", "asc")
+    .orderBy("timestamp", "desc") // newest first
     .onSnapshot(snapshot => {
       transactions = [];
 
@@ -31,28 +30,42 @@ function loadTransactions() {
       });
 
       updateUI();
+    }, error => {
+      alert("Error loading data");
+      console.error(error);
     });
 }
 
 // ==========================
 // ADD TRANSACTION
 // ==========================
-
 function addTransaction(type) {
-  const desc = document.getElementById("desc").value;
-  const amount = Number(document.getElementById("amount").value);
+  const descInput = document.getElementById("desc");
+  const amountInput = document.getElementById("amount");
 
-  if (!desc || !amount) return;
+  const desc = descInput.value.trim();
+  const amount = Number(amountInput.value);
+
+  // validation
+  if (!desc || isNaN(amount)) {
+    alert("Please enter valid description and amount");
+    return;
+  }
 
   db.collection("transactions").add({
     type,
     desc,
     amount,
     timestamp: Date.now()
+  })
+  .then(() => {
+    descInput.value = "";
+    amountInput.value = "";
+  })
+  .catch(err => {
+    alert("Error adding transaction");
+    console.error(err);
   });
-
-  document.getElementById("desc").value = "";
-  document.getElementById("amount").value = "";
 }
 
 function addIncome() {
@@ -66,48 +79,83 @@ function addExpense() {
 // ==========================
 // DELETE TRANSACTION
 // ==========================
-
 function deleteTransaction(id) {
-  db.collection("transactions").doc(id).delete();
+  db.collection("transactions").doc(id).delete()
+    .catch(err => {
+      alert("Error deleting transaction");
+      console.error(err);
+    });
 }
 
 // ==========================
 // EDIT TRANSACTION
 // ==========================
-
 function editTransaction(id, currentDesc, currentAmount) {
   const newDesc = prompt("Edit description:", currentDesc);
   const newAmount = prompt("Edit amount:", currentAmount);
 
-  if (!newDesc || !newAmount) return;
+  if (!newDesc || isNaN(newAmount)) {
+    alert("Invalid input");
+    return;
+  }
 
   db.collection("transactions").doc(id).update({
-    desc: newDesc,
+    desc: newDesc.trim(),
     amount: Number(newAmount)
+  })
+  .catch(err => {
+    alert("Error updating transaction");
+    console.error(err);
   });
 }
 
 // ==========================
 // UI RENDER
 // ==========================
-
 function updateUI() {
   const list = document.getElementById("list");
   const balanceEl = document.getElementById("balance");
+  const incomeEl = document.getElementById("income");
+  const expensesEl = document.getElementById("expenses");
 
   list.innerHTML = "";
 
   let balance = 0;
+  let income = 0;
+  let expenses = 0;
 
   transactions.forEach(t => {
     const li = document.createElement("li");
 
+    // color indicator
+    li.style.display = "flex";
+    li.style.justifyContent = "space-between";
+    li.style.alignItems = "center";
+    li.style.padding = "10px";
+    li.style.marginTop = "5px";
+    li.style.borderRadius = "6px";
+
+    if (t.type === "Income") {
+      li.style.borderLeft = "5px solid green";
+      balance += t.amount;
+      income += t.amount;
+    } else {
+      li.style.borderLeft = "5px solid red";
+      balance -= t.amount;
+      expenses += t.amount;
+    }
+
+    // formatted date
+    const date = new Date(t.timestamp).toLocaleDateString();
+
     // text
     const text = document.createElement("span");
-    text.textContent = `${t.type}: ${t.desc} $${t.amount}`;
+    text.textContent = `${t.type}: ${t.desc} $${t.amount} (${date})`;
 
-    // container for buttons
-    const btnContainer = document.createElement("span");
+    // buttons container
+    const btnContainer = document.createElement("div");
+    btnContainer.style.display = "flex";
+    btnContainer.style.gap = "5px";
 
     // EDIT button
     const editBtn = document.createElement("button");
@@ -120,12 +168,10 @@ function updateUI() {
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "Delete";
     deleteBtn.onclick = () => {
-      deleteTransaction(t.id);
+      if (confirm("Delete this transaction?")) {
+        deleteTransaction(t.id);
+      }
     };
-
-    // spacing
-    editBtn.style.marginLeft = "10px";
-    deleteBtn.style.marginLeft = "5px";
 
     btnContainer.appendChild(editBtn);
     btnContainer.appendChild(deleteBtn);
@@ -134,16 +180,15 @@ function updateUI() {
     li.appendChild(btnContainer);
 
     list.appendChild(li);
-
-    if (t.type === "Income") balance += t.amount;
-    else balance -= t.amount;
   });
 
+  // update totals
   balanceEl.textContent = `$${balance}`;
+  incomeEl.textContent = income;
+  expensesEl.textContent = expenses;
 }
 
 // ==========================
 // START APP
 // ==========================
-
 loadTransactions();
