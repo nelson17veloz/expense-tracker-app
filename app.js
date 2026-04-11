@@ -14,6 +14,8 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 let transactions = [];
+let activeRangeStart = "";
+let activeRangeEnd = "";
 
 // ==========================
 // HELPERS
@@ -25,6 +27,25 @@ function formatMoney(value) {
 function formatDate(timestamp) {
   if (!timestamp) return "No date";
   return new Date(timestamp).toLocaleDateString();
+}
+
+function formatDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatMonthLabel(monthValue) {
+  if (!monthValue) return "Current month";
+
+  const [year, month] = monthValue.split("-");
+  const date = new Date(Number(year), Number(month) - 1, 1);
+
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric"
+  });
 }
 
 function clearInputs() {
@@ -52,6 +73,111 @@ function validateTransaction(desc, amountValue) {
   }
 
   return true;
+}
+
+function getStartOfDay(dateString) {
+  const date = new Date(`${dateString}T00:00:00`);
+  return date.getTime();
+}
+
+function getEndOfDay(dateString) {
+  const date = new Date(`${dateString}T23:59:59.999`);
+  return date.getTime();
+}
+
+function getCurrentMonthValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function getTransactionsInRange(startDate, endDate) {
+  return transactions.filter((transaction) => {
+    const timestamp = Number(transaction.timestamp);
+    if (startDate && timestamp < getStartOfDay(startDate)) return false;
+    if (endDate && timestamp > getEndOfDay(endDate)) return false;
+    return true;
+  });
+}
+
+function getTransactionsForMonth(monthValue) {
+  const [year, month] = monthValue.split("-");
+  const monthStart = new Date(Number(year), Number(month) - 1, 1).getTime();
+  const monthEnd = new Date(Number(year), Number(month), 0, 23, 59, 59, 999).getTime();
+
+  return transactions.filter((transaction) => {
+    const timestamp = Number(transaction.timestamp);
+    return timestamp >= monthStart && timestamp <= monthEnd;
+  });
+}
+
+function calculateSummaryData(items) {
+  let income = 0;
+  let expenses = 0;
+  let highestIncome = null;
+  let highestExpense = null;
+
+  items.forEach((transaction) => {
+    const amount = Number(transaction.amount);
+
+    if (transaction.type === "Income") {
+      income += amount;
+      if (!highestIncome || amount > Number(highestIncome.amount)) {
+        highestIncome = transaction;
+      }
+    } else {
+      expenses += amount;
+      if (!highestExpense || amount > Number(highestExpense.amount)) {
+        highestExpense = transaction;
+      }
+    }
+  });
+
+  return {
+    income,
+    expenses,
+    net: income - expenses,
+    highestIncome,
+    highestExpense
+  };
+}
+
+function applySummaryToElements(summary, ids) {
+  const incomeEl = document.getElementById(ids.income);
+  const expensesEl = document.getElementById(ids.expenses);
+  const netEl = document.getElementById(ids.net);
+  const highestIncomeEl = document.getElementById(ids.highestIncome);
+  const highestIncomeDateEl = document.getElementById(ids.highestIncomeDate);
+  const highestExpenseEl = document.getElementById(ids.highestExpense);
+  const highestExpenseDateEl = document.getElementById(ids.highestExpenseDate);
+
+  incomeEl.textContent = formatMoney(summary.income);
+  expensesEl.textContent = formatMoney(summary.expenses);
+  netEl.textContent = `$${formatMoney(summary.net)}`;
+
+  netEl.classList.remove("net-positive", "net-negative");
+  if (summary.net >= 0) {
+    netEl.classList.add("net-positive");
+  } else {
+    netEl.classList.add("net-negative");
+  }
+
+  if (summary.highestIncome) {
+    highestIncomeEl.textContent = `${summary.highestIncome.desc} — $${formatMoney(summary.highestIncome.amount)}`;
+    highestIncomeDateEl.textContent = formatDate(summary.highestIncome.timestamp);
+  } else {
+    highestIncomeEl.textContent = "None";
+    highestIncomeDateEl.textContent = "No income found";
+  }
+
+  if (summary.highestExpense) {
+    highestExpenseEl.textContent = `${summary.highestExpense.desc} — $${formatMoney(summary.highestExpense.amount)}`;
+    highestExpenseDateEl.textContent = formatDate(summary.highestExpense.timestamp);
+  } else {
+    highestExpenseEl.textContent = "None";
+    highestExpenseDateEl.textContent = "No expense found";
+  }
 }
 
 // ==========================
@@ -156,6 +282,92 @@ function editTransaction(id, currentDesc, currentAmount) {
 }
 
 // ==========================
+// RANGE SUMMARY
+// ==========================
+function applyRangeSummary() {
+  const startInput = document.getElementById("rangeStart");
+  const endInput = document.getElementById("rangeEnd");
+
+  const startValue = startInput.value;
+  const endValue = endInput.value;
+
+  if (startValue && endValue && getStartOfDay(startValue) > getEndOfDay(endValue)) {
+    alert("Start date cannot be after end date.");
+    return;
+  }
+
+  activeRangeStart = startValue;
+  activeRangeEnd = endValue;
+
+  updateRangeSummary();
+}
+
+function resetRangeSummary() {
+  activeRangeStart = "";
+  activeRangeEnd = "";
+
+  document.getElementById("rangeStart").value = "";
+  document.getElementById("rangeEnd").value = "";
+
+  updateRangeSummary();
+}
+
+function updateRangeSummary() {
+  const labelEl = document.getElementById("selectedRangeLabel");
+  const filteredTransactions = getTransactionsInRange(activeRangeStart, activeRangeEnd);
+  const summary = calculateSummaryData(filteredTransactions);
+
+  if (activeRangeStart && activeRangeEnd) {
+    labelEl.textContent = `${activeRangeStart} to ${activeRangeEnd}`;
+  } else if (activeRangeStart) {
+    labelEl.textContent = `From ${activeRangeStart}`;
+  } else if (activeRangeEnd) {
+    labelEl.textContent = `Up to ${activeRangeEnd}`;
+  } else {
+    labelEl.textContent = "Showing all transactions";
+  }
+
+  applySummaryToElements(summary, {
+    income: "rangeIncome",
+    expenses: "rangeExpenses",
+    net: "rangeNet",
+    highestIncome: "rangeHighestIncome",
+    highestIncomeDate: "rangeHighestIncomeDate",
+    highestExpense: "rangeHighestExpense",
+    highestExpenseDate: "rangeHighestExpenseDate"
+  });
+}
+
+// ==========================
+// MONTHLY SUMMARY
+// ==========================
+function updateMonthlySummary() {
+  const monthPicker = document.getElementById("monthPicker");
+  const selectedMonthLabel = document.getElementById("selectedMonthLabel");
+
+  let monthValue = monthPicker.value;
+  if (!monthValue) {
+    monthValue = getCurrentMonthValue();
+    monthPicker.value = monthValue;
+  }
+
+  selectedMonthLabel.textContent = formatMonthLabel(monthValue);
+
+  const monthlyTransactions = getTransactionsForMonth(monthValue);
+  const summary = calculateSummaryData(monthlyTransactions);
+
+  applySummaryToElements(summary, {
+    income: "monthIncome",
+    expenses: "monthExpenses",
+    net: "monthNet",
+    highestIncome: "monthHighestIncome",
+    highestIncomeDate: "monthHighestIncomeDate",
+    highestExpense: "monthHighestExpense",
+    highestExpenseDate: "monthHighestExpenseDate"
+  });
+}
+
+// ==========================
 // UI RENDER
 // ==========================
 function updateUI() {
@@ -243,9 +455,19 @@ function updateUI() {
   balanceEl.textContent = `$${formatMoney(balance)}`;
   incomeEl.textContent = formatMoney(income);
   expensesEl.textContent = formatMoney(expenses);
+
+  updateRangeSummary();
+  updateMonthlySummary();
 }
 
 // ==========================
 // START APP
 // ==========================
-loadTransactions();
+document.addEventListener("DOMContentLoaded", () => {
+  const monthPicker = document.getElementById("monthPicker");
+  monthPicker.value = getCurrentMonthValue();
+
+  monthPicker.addEventListener("change", updateMonthlySummary);
+
+  loadTransactions();
+});

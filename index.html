@@ -80,6 +80,106 @@
       </div>
     </section>
 
+    <section class="card range-summary-card">
+      <div class="section-header">
+        <h3>Custom Range Summary</h3>
+      </div>
+
+      <div class="date-filter-grid">
+        <div class="input-group">
+          <label for="rangeStart">Start Date</label>
+          <input type="date" id="rangeStart" />
+        </div>
+
+        <div class="input-group">
+          <label for="rangeEnd">End Date</label>
+          <input type="date" id="rangeEnd" />
+        </div>
+      </div>
+
+      <div class="filter-btn-row">
+        <button class="secondary-btn" onclick="applyRangeSummary()">
+          Apply Range
+        </button>
+        <button class="secondary-btn secondary-btn-muted" onclick="resetRangeSummary()">
+          Reset
+        </button>
+      </div>
+
+      <div class="range-label" id="selectedRangeLabel">Showing all transactions</div>
+
+      <div class="monthly-grid">
+        <div class="mini-stat">
+          <span>Income</span>
+          <strong>$<span id="rangeIncome">0.00</span></strong>
+        </div>
+
+        <div class="mini-stat">
+          <span>Expenses</span>
+          <strong>$<span id="rangeExpenses">0.00</span></strong>
+        </div>
+
+        <div class="mini-stat">
+          <span>Net</span>
+          <strong id="rangeNet">$0.00</strong>
+        </div>
+
+        <div class="mini-stat wide-stat">
+          <span>Highest Income</span>
+          <strong id="rangeHighestIncome">None</strong>
+          <small id="rangeHighestIncomeDate">—</small>
+        </div>
+
+        <div class="mini-stat wide-stat">
+          <span>Highest Expense</span>
+          <strong id="rangeHighestExpense">None</strong>
+          <small id="rangeHighestExpenseDate">—</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="card monthly-summary-card">
+      <div class="section-header">
+        <h3>Monthly Summary</h3>
+      </div>
+
+      <div class="input-group">
+        <label for="monthPicker">Choose Month</label>
+        <input type="month" id="monthPicker" />
+      </div>
+
+      <div class="month-label" id="selectedMonthLabel">Current month</div>
+
+      <div class="monthly-grid">
+        <div class="mini-stat">
+          <span>Income</span>
+          <strong>$<span id="monthIncome">0.00</span></strong>
+        </div>
+
+        <div class="mini-stat">
+          <span>Expenses</span>
+          <strong>$<span id="monthExpenses">0.00</span></strong>
+        </div>
+
+        <div class="mini-stat">
+          <span>Net</span>
+          <strong id="monthNet">$0.00</strong>
+        </div>
+
+        <div class="mini-stat wide-stat">
+          <span>Highest Income</span>
+          <strong id="monthHighestIncome">None</strong>
+          <small id="monthHighestIncomeDate">—</small>
+        </div>
+
+        <div class="mini-stat wide-stat">
+          <span>Highest Expense</span>
+          <strong id="monthHighestExpense">None</strong>
+          <small id="monthHighestExpenseDate">—</small>
+        </div>
+      </div>
+    </section>
+
     <section class="card list-card">
       <div class="section-header">
         <h3>Transactions</h3>
