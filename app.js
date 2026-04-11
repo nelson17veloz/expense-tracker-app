@@ -1,4 +1,6 @@
-
+// ==========================
+// FIREBASE SETUP
+// ==========================
 const firebaseConfig = {
   apiKey: "AIzaSyBspytMh9FSEc9Fg8rL4bb9W7hQXngiOtA",
   authDomain: "expense-tracker-dfb13.firebaseapp.com",
@@ -14,26 +16,60 @@ const db = firebase.firestore();
 let transactions = [];
 
 // ==========================
-// LOAD TRANSACTIONS (REAL-TIME)
+// HELPERS
+// ==========================
+function formatMoney(value) {
+  return Number(value).toFixed(2);
+}
+
+function formatDate(timestamp) {
+  if (!timestamp) return "No date";
+  return new Date(timestamp).toLocaleDateString();
+}
+
+function clearInputs() {
+  document.getElementById("desc").value = "";
+  document.getElementById("amount").value = "";
+}
+
+function validateTransaction(desc, amount) {
+  if (!desc.trim()) {
+    alert("Please enter a description.");
+    return false;
+  }
+
+  if (amount === "" || isNaN(Number(amount))) {
+    alert("Please enter a valid amount.");
+    return false;
+  }
+
+  return true;
+}
+
+// ==========================
+// LOAD TRANSACTIONS
 // ==========================
 function loadTransactions() {
   db.collection("transactions")
-    .orderBy("timestamp", "desc") // newest first
-    .onSnapshot(snapshot => {
-      transactions = [];
+    .orderBy("timestamp", "desc")
+    .onSnapshot(
+      (snapshot) => {
+        transactions = [];
 
-      snapshot.forEach(doc => {
-        transactions.push({
-          id: doc.id,
-          ...doc.data()
+        snapshot.forEach((doc) => {
+          transactions.push({
+            id: doc.id,
+            ...doc.data()
+          });
         });
-      });
 
-      updateUI();
-    }, error => {
-      alert("Error loading data");
-      console.error(error);
-    });
+        updateUI();
+      },
+      (error) => {
+        console.error("Error loading transactions:", error);
+        alert("There was a problem loading your transactions.");
+      }
+    );
 }
 
 // ==========================
@@ -44,28 +80,26 @@ function addTransaction(type) {
   const amountInput = document.getElementById("amount");
 
   const desc = descInput.value.trim();
-  const amount = Number(amountInput.value);
+  const amountValue = amountInput.value;
 
-  // validation
-  if (!desc || isNaN(amount)) {
-    alert("Please enter valid description and amount");
-    return;
-  }
+  if (!validateTransaction(desc, amountValue)) return;
 
-  db.collection("transactions").add({
-    type,
-    desc,
-    amount,
-    timestamp: Date.now()
-  })
-  .then(() => {
-    descInput.value = "";
-    amountInput.value = "";
-  })
-  .catch(err => {
-    alert("Error adding transaction");
-    console.error(err);
-  });
+  const amount = Number(amountValue);
+
+  db.collection("transactions")
+    .add({
+      type,
+      desc,
+      amount,
+      timestamp: Date.now()
+    })
+    .then(() => {
+      clearInputs();
+    })
+    .catch((error) => {
+      console.error("Error adding transaction:", error);
+      alert("There was a problem adding the transaction.");
+    });
 }
 
 function addIncome() {
@@ -80,10 +114,12 @@ function addExpense() {
 // DELETE TRANSACTION
 // ==========================
 function deleteTransaction(id) {
-  db.collection("transactions").doc(id).delete()
-    .catch(err => {
-      alert("Error deleting transaction");
-      console.error(err);
+  db.collection("transactions")
+    .doc(id)
+    .delete()
+    .catch((error) => {
+      console.error("Error deleting transaction:", error);
+      alert("There was a problem deleting the transaction.");
     });
 }
 
@@ -92,21 +128,23 @@ function deleteTransaction(id) {
 // ==========================
 function editTransaction(id, currentDesc, currentAmount) {
   const newDesc = prompt("Edit description:", currentDesc);
+  if (newDesc === null) return;
+
   const newAmount = prompt("Edit amount:", currentAmount);
+  if (newAmount === null) return;
 
-  if (!newDesc || isNaN(newAmount)) {
-    alert("Invalid input");
-    return;
-  }
+  if (!validateTransaction(newDesc, newAmount)) return;
 
-  db.collection("transactions").doc(id).update({
-    desc: newDesc.trim(),
-    amount: Number(newAmount)
-  })
-  .catch(err => {
-    alert("Error updating transaction");
-    console.error(err);
-  });
+  db.collection("transactions")
+    .doc(id)
+    .update({
+      desc: newDesc.trim(),
+      amount: Number(newAmount)
+    })
+    .catch((error) => {
+      console.error("Error updating transaction:", error);
+      alert("There was a problem updating the transaction.");
+    });
 }
 
 // ==========================
@@ -124,68 +162,73 @@ function updateUI() {
   let income = 0;
   let expenses = 0;
 
-  transactions.forEach(t => {
+  if (transactions.length === 0) {
+    list.innerHTML = `<li class="empty-state">No transactions yet.</li>`;
+  }
+
+  transactions.forEach((t) => {
     const li = document.createElement("li");
+    li.className = `transaction-item ${t.type === "Income" ? "income" : "expense"}`;
 
-    // color indicator
-    li.style.display = "flex";
-    li.style.justifyContent = "space-between";
-    li.style.alignItems = "center";
-    li.style.padding = "10px";
-    li.style.marginTop = "5px";
-    li.style.borderRadius = "6px";
+    const left = document.createElement("div");
+    left.className = "transaction-left";
 
-    if (t.type === "Income") {
-      li.style.borderLeft = "5px solid green";
-      balance += t.amount;
-      income += t.amount;
-    } else {
-      li.style.borderLeft = "5px solid red";
-      balance -= t.amount;
-      expenses += t.amount;
-    }
+    const title = document.createElement("p");
+    title.className = "transaction-title";
+    title.textContent = t.desc;
 
-    // formatted date
-    const date = new Date(t.timestamp).toLocaleDateString();
+    const meta = document.createElement("p");
+    meta.className = "transaction-meta";
+    meta.textContent = `${t.type} • ${formatDate(t.timestamp)}`;
 
-    // text
-    const text = document.createElement("span");
-    text.textContent = `${t.type}: ${t.desc} $${t.amount} (${date})`;
+    left.appendChild(title);
+    left.appendChild(meta);
 
-    // buttons container
-    const btnContainer = document.createElement("div");
-    btnContainer.style.display = "flex";
-    btnContainer.style.gap = "5px";
+    const right = document.createElement("div");
+    right.className = "transaction-right";
 
-    // EDIT button
+    const amount = document.createElement("span");
+    amount.className = `transaction-amount ${t.type === "Income" ? "income-text" : "expense-text"}`;
+    amount.textContent = `${t.type === "Income" ? "+" : "-"}$${formatMoney(t.amount)}`;
+
     const editBtn = document.createElement("button");
-    editBtn.textContent = "Edit";
+    editBtn.textContent = "✏️";
+    editBtn.className = "small-btn edit-btn";
     editBtn.onclick = () => {
       editTransaction(t.id, t.desc, t.amount);
     };
 
-    // DELETE button
     const deleteBtn = document.createElement("button");
-    deleteBtn.textContent = "Delete";
+    deleteBtn.textContent = "🗑️";
+    deleteBtn.className = "small-btn delete-btn";
     deleteBtn.onclick = () => {
-      if (confirm("Delete this transaction?")) {
+      const confirmed = confirm("Delete this transaction?");
+      if (confirmed) {
         deleteTransaction(t.id);
       }
     };
 
-    btnContainer.appendChild(editBtn);
-    btnContainer.appendChild(deleteBtn);
+    right.appendChild(amount);
+    right.appendChild(editBtn);
+    right.appendChild(deleteBtn);
 
-    li.appendChild(text);
-    li.appendChild(btnContainer);
+    li.appendChild(left);
+    li.appendChild(right);
 
     list.appendChild(li);
+
+    if (t.type === "Income") {
+      balance += Number(t.amount);
+      income += Number(t.amount);
+    } else {
+      balance -= Number(t.amount);
+      expenses += Number(t.amount);
+    }
   });
 
-  // update totals
-  balanceEl.textContent = `$${balance}`;
-  incomeEl.textContent = income;
-  expensesEl.textContent = expenses;
+  balanceEl.textContent = `$${formatMoney(balance)}`;
+  incomeEl.textContent = formatMoney(income);
+  expensesEl.textContent = formatMoney(expenses);
 }
 
 // ==========================
