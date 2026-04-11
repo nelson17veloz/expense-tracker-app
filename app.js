@@ -29,13 +29,6 @@ function formatDate(timestamp) {
   return new Date(timestamp).toLocaleDateString();
 }
 
-function formatDateInputValue(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function formatMonthLabel(monthValue) {
   if (!monthValue) return "Current month";
 
@@ -76,13 +69,11 @@ function validateTransaction(desc, amountValue) {
 }
 
 function getStartOfDay(dateString) {
-  const date = new Date(`${dateString}T00:00:00`);
-  return date.getTime();
+  return new Date(`${dateString}T00:00:00`).getTime();
 }
 
 function getEndOfDay(dateString) {
-  const date = new Date(`${dateString}T23:59:59.999`);
-  return date.getTime();
+  return new Date(`${dateString}T23:59:59.999`).getTime();
 }
 
 function getCurrentMonthValue() {
@@ -178,6 +169,14 @@ function applySummaryToElements(summary, ids) {
     highestExpenseEl.textContent = "None";
     highestExpenseDateEl.textContent = "No expense found";
   }
+}
+
+function toggleSection(sectionId, button) {
+  const content = document.getElementById(sectionId);
+  const isOpen = content.classList.contains("open");
+
+  content.classList.toggle("open", !isOpen);
+  button.classList.toggle("open", !isOpen);
 }
 
 // ==========================
@@ -466,7 +465,6 @@ function updateUI() {
 document.addEventListener("DOMContentLoaded", () => {
   const monthPicker = document.getElementById("monthPicker");
   monthPicker.value = getCurrentMonthValue();
-
   monthPicker.addEventListener("change", updateMonthlySummary);
 
   loadTransactions();

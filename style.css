@@ -7,7 +7,6 @@
   --muted-2: #8e8ea3;
   --green: #22c55e;
   --red: #ef4444;
-  --blue: #3b82f6;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
   --radius-lg: 24px;
 }
@@ -92,6 +91,44 @@ body {
   padding: 18px;
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
+}
+
+.collapsible-card {
+  padding: 14px 16px;
+}
+
+.collapse-toggle {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.collapse-icon {
+  font-size: 20px;
+  transition: transform 0.2s ease;
+}
+
+.collapse-toggle.open .collapse-icon {
+  transform: rotate(180deg);
+}
+
+.collapse-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.28s ease;
+}
+
+.collapse-content.open {
+  max-height: 1200px;
+  margin-top: 16px;
 }
 
 .hero-top {
