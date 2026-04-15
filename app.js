@@ -26,18 +26,18 @@ let currentLanguage = localStorage.getItem("language") || "en";
 let recurringProcessing = false;
 
 const LOCAL_TRANSACTIONS_KEY = "expense_tracker_cached_transactions_v2";
-const CUSTOM_CATEGORIES_KEY = "expense_tracker_categories_v1";
+const CUSTOM_CATEGORIES_KEY = "expense_tracker_categories_v2";
 
 const DEFAULT_CATEGORIES = [
-  "General",
-  "Food",
   "Bills",
-  "Gas",
-  "Rent",
   "Entertainment",
-  "Shopping",
-  "Salary",
+  "Food",
   "Freelance",
+  "Gas",
+  "General",
+  "Rent",
+  "Salary",
+  "Shopping",
   "Other"
 ];
 
@@ -115,7 +115,7 @@ const translations = {
     noCategoryTotals: "No category totals yet.",
     noTransactionsFound: "No transactions found.",
     transactionDeleted: "Transaction deleted.",
-    transactionSaved: "Transaction saved.",
+    transactionSaved: "Saved.",
     restored: "Transaction restored.",
     undo: "Undo",
     confirmDelete: "Delete this transaction?",
@@ -139,7 +139,7 @@ const translations = {
     entertainment: "Entertainment",
     shopping: "Shopping",
     salary: "Salary",
-    freelance: "Freelance",
+    studio: "Studio",
     other: "Other",
     spent: "Spent",
     remaining: "Remaining",
@@ -237,7 +237,7 @@ const translations = {
     noCategoryTotals: "Todavía no hay totales por categoría.",
     noTransactionsFound: "No se encontraron movimientos.",
     transactionDeleted: "Movimiento eliminado.",
-    transactionSaved: "Movimiento guardado.",
+    transactionSaved: "Guardado.",
     restored: "Movimiento restaurado.",
     undo: "Deshacer",
     confirmDelete: "¿Eliminar este movimiento?",
@@ -261,7 +261,7 @@ const translations = {
     entertainment: "Entretenimiento",
     shopping: "Compras",
     salary: "Salario",
-    freelance: "Trabajo Independiente",
+    studio: "Studio",
     other: "Otro",
     spent: "Gastado",
     remaining: "Restante",
@@ -299,7 +299,7 @@ const categoryTranslationKeys = {
   Entertainment: "entertainment",
   Shopping: "shopping",
   Salary: "salary",
-  Freelance: "freelance",
+  Studio: "studio",
   Other: "other"
 };
 
@@ -318,22 +318,22 @@ function translateCategory(category) {
   return category;
 }
 
+function normalizeOtherLabel(category) {
+  return String(category || "").trim().toLowerCase() === "other" ? "Other" : String(category || "").trim();
+}
+
 function loadCategories() {
   try {
     const raw = localStorage.getItem(CUSTOM_CATEGORIES_KEY);
-    if (!raw) return [...DEFAULT_CATEGORIES];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [...DEFAULT_CATEGORIES];
-
-    const cleaned = parsed
-      .map((item) => String(item).trim())
-      .filter((item) => item.length > 0);
-
+    const parsed = raw ? JSON.parse(raw) : [];
+    const incoming = Array.isArray(parsed) ? parsed : [];
     const merged = [...DEFAULT_CATEGORIES];
-    cleaned.forEach((category) => {
-      if (!merged.some((existing) => existing.toLowerCase() === category.toLowerCase())) {
-        merged.push(category);
-      }
+
+    incoming.forEach((item) => {
+      const cleaned = normalizeOtherLabel(item);
+      if (!cleaned) return;
+      const exists = merged.some((existing) => existing.toLowerCase() === cleaned.toLowerCase());
+      if (!exists) merged.push(cleaned);
     });
 
     return merged;
@@ -347,7 +347,18 @@ function saveCategories() {
 }
 
 function sortCategoriesForDisplay(categories) {
-  return [...categories].sort((a, b) => translateCategory(a).localeCompare(translateCategory(b)));
+  return [...categories].sort((a, b) => {
+    const aName = normalizeOtherLabel(a);
+    const bName = normalizeOtherLabel(b);
+
+    const aIsOther = aName.toLowerCase() === "other";
+    const bIsOther = bName.toLowerCase() === "other";
+
+    if (aIsOther && !bIsOther) return 1;
+    if (!aIsOther && bIsOther) return -1;
+
+    return translateCategory(aName).localeCompare(translateCategory(bName));
+  });
 }
 
 function populateCategorySelects() {
@@ -369,7 +380,7 @@ function populateCategorySelects() {
       select.appendChild(option);
     });
 
-    if (sortedCategories.includes(currentValue)) {
+    if (currentValue && sortedCategories.includes(currentValue)) {
       select.value = currentValue;
     } else if (sortedCategories.length > 0) {
       select.value = sortedCategories[0];
@@ -393,7 +404,7 @@ function populateCategorySelects() {
     });
 
     if (currentValue === "All" || sortedCategories.includes(currentValue)) {
-      filterSelect.value = currentValue;
+      filterSelect.value = currentValue || "All";
     } else {
       filterSelect.value = "All";
     }
@@ -402,6 +413,8 @@ function populateCategorySelects() {
 
 function addCustomCategory() {
   const input = document.getElementById("newCategoryInput");
+  if (!input) return;
+
   const rawValue = input.value.trim();
 
   if (!rawValue) {
@@ -414,11 +427,13 @@ function addCustomCategory() {
     return;
   }
 
-  const normalized = rawValue
-    .split(" ")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  const normalized = normalizeOtherLabel(
+    rawValue
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+  );
 
   const exists = customCategories.some(
     (category) => category.toLowerCase() === normalized.toLowerCase()
@@ -433,16 +448,20 @@ function addCustomCategory() {
   saveCategories();
   populateCategorySelects();
 
-  document.getElementById("category").value = normalized;
-  document.getElementById("budgetCategory").value = normalized;
-  input.value = "";
+  const categorySelect = document.getElementById("category");
+  const budgetCategorySelect = document.getElementById("budgetCategory");
+  if (categorySelect) categorySelect.value = normalized;
+  if (budgetCategorySelect) budgetCategorySelect.value = normalized;
 
+  input.value = "";
   showToast(t("categoryAdded"));
   updateUI();
 }
 
 function setSyncBadge(mode) {
   const syncBadge = document.getElementById("syncBadge");
+  if (!syncBadge) return;
+
   syncBadge.className = "status-badge neutral";
 
   if (mode === "syncing") {
@@ -456,6 +475,8 @@ function setSyncBadge(mode) {
 
 function updateConnectionBadge() {
   const badge = document.getElementById("connectionBadge");
+  if (!badge) return;
+
   if (navigator.onLine) {
     badge.textContent = t("online");
     badge.className = "status-badge online";
@@ -468,7 +489,10 @@ function updateConnectionBadge() {
 function showToast(message, showUndo = false) {
   const toast = document.getElementById("toast");
   const undoBtn = document.getElementById("undoDeleteBtn");
-  document.getElementById("toastMessage").textContent = message;
+  const toastMessage = document.getElementById("toastMessage");
+  if (!toast || !undoBtn || !toastMessage) return;
+
+  toastMessage.textContent = message;
 
   if (showUndo) {
     undoBtn.classList.remove("hidden");
@@ -482,34 +506,42 @@ function showToast(message, showUndo = false) {
   if (deleteUndoTimer) clearTimeout(deleteUndoTimer);
   deleteUndoTimer = setTimeout(() => {
     toast.classList.add("hidden");
-    if (showUndo) {
-      deletedTransactionCache = null;
-    }
+    if (showUndo) deletedTransactionCache = null;
   }, 4000);
 }
 
 function setPlaceholders() {
-  document.getElementById("desc").placeholder =
-    currentLanguage === "en" ? "Paycheck, Groceries, Gas..." : "Cheque, Compra, Gasolina...";
-  document.getElementById("amount").placeholder = "0.00";
-  document.getElementById("notes").placeholder =
-    currentLanguage === "en" ? "Optional notes..." : "Notas opcionales...";
-  document.getElementById("searchInput").placeholder =
+  const desc = document.getElementById("desc");
+  const amount = document.getElementById("amount");
+  const notes = document.getElementById("notes");
+  const searchInput = document.getElementById("searchInput");
+  const budgetAmount = document.getElementById("budgetAmount");
+  const newCategoryInput = document.getElementById("newCategoryInput");
+
+  if (desc) desc.placeholder = currentLanguage === "en" ? "Paycheck, Groceries, Gas..." : "Cheque, Compra, Gasolina...";
+  if (amount) amount.placeholder = "0.00";
+  if (notes) notes.placeholder = currentLanguage === "en" ? "Optional notes..." : "Notas opcionales...";
+  if (searchInput) searchInput.placeholder =
     currentLanguage === "en"
       ? "Search description, notes, category..."
       : "Buscar descripción, notas, categoría...";
-  document.getElementById("budgetAmount").placeholder = "0.00";
-  document.getElementById("newCategoryInput").placeholder =
-  currentLanguage === "en" ? "Enter category..." : "Escribe categoría...";
+  if (budgetAmount) budgetAmount.placeholder = "0.00";
+  if (newCategoryInput) newCategoryInput.placeholder = "";
 }
 
 function translateStaticText() {
   document.documentElement.lang = currentLanguage;
+
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     const key = el.getAttribute("data-i18n");
     el.textContent = t(key);
   });
-  document.getElementById("languageToggleBtn").textContent = currentLanguage === "en" ? "ES" : "EN";
+
+  const languageToggleBtn = document.getElementById("languageToggleBtn");
+  if (languageToggleBtn) {
+    languageToggleBtn.textContent = currentLanguage === "en" ? "ES" : "EN";
+  }
+
   setPlaceholders();
   updateConnectionBadge();
   setSyncBadge(navigator.onLine ? "ready" : "cached");
@@ -584,11 +616,9 @@ function addMonths(timestamp, months) {
   const date = new Date(Number(timestamp));
   const day = date.getDate();
   date.setMonth(date.getMonth() + months);
-
   if (date.getDate() < day) {
     date.setDate(0);
   }
-
   return date.getTime();
 }
 
@@ -643,13 +673,22 @@ function getChartColors() {
 }
 
 function clearInputs() {
-  document.getElementById("desc").value = "";
-  document.getElementById("amount").value = "";
-  document.getElementById("category").value = sortCategoriesForDisplay(customCategories)[0] || "General";
-  document.getElementById("notes").value = "";
-  document.getElementById("transactionDate").value = getTodayInputValue();
-  document.getElementById("isRecurring").value = "false";
-  document.getElementById("recurringInterval").value = "monthly";
+  const sorted = sortCategoriesForDisplay(customCategories);
+  const categorySelect = document.getElementById("category");
+  const desc = document.getElementById("desc");
+  const amount = document.getElementById("amount");
+  const notes = document.getElementById("notes");
+  const transactionDate = document.getElementById("transactionDate");
+  const isRecurring = document.getElementById("isRecurring");
+  const recurringInterval = document.getElementById("recurringInterval");
+
+  if (desc) desc.value = "";
+  if (amount) amount.value = "";
+  if (categorySelect) categorySelect.value = sorted[0] || "Bills";
+  if (notes) notes.value = "";
+  if (transactionDate) transactionDate.value = getTodayInputValue();
+  if (isRecurring) isRecurring.value = "false";
+  if (recurringInterval) recurringInterval.value = "monthly";
 }
 
 function validateTransaction(desc, amountValue, dateValue) {
@@ -681,6 +720,8 @@ function validateTransaction(desc, amountValue, dateValue) {
 
 function toggleSection(sectionId, button) {
   const content = document.getElementById(sectionId);
+  if (!content || !button) return;
+
   const isOpen = content.classList.contains("open");
   content.classList.toggle("open", !isOpen);
   button.classList.toggle("open", !isOpen);
@@ -688,11 +729,12 @@ function toggleSection(sectionId, button) {
 
 function normalizeTransaction(docId, data) {
   const fallbackTimestamp = data.createdAt || data.timestamp || Date.now();
+  const category = normalizeOtherLabel(data.category || "General");
 
   return {
     id: docId,
     ...data,
-    category: data.category || "General",
+    category,
     timestamp: Number(data.timestamp || fallbackTimestamp),
     createdAt: Number(data.createdAt || fallbackTimestamp),
     updatedAt: Number(data.updatedAt || fallbackTimestamp),
@@ -712,8 +754,10 @@ function loadCachedTransactions() {
   try {
     const raw = localStorage.getItem(LOCAL_TRANSACTIONS_KEY);
     if (!raw) return;
+
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return;
+
     transactions = parsed.map((item) => normalizeTransaction(item.id || `local-${Math.random()}`, item));
     setSyncBadge("cached");
     updateUI();
@@ -731,14 +775,14 @@ async function loadTransactions() {
       });
 
       transactions.forEach((transaction) => {
-        if (
-          transaction.category &&
-          !customCategories.some((category) => category.toLowerCase() === transaction.category.toLowerCase())
-        ) {
-          customCategories.push(transaction.category);
+        const category = normalizeOtherLabel(transaction.category);
+        const exists = customCategories.some((item) => item.toLowerCase() === category.toLowerCase());
+        if (category && !exists) {
+          customCategories.push(category);
         }
       });
 
+      customCategories = sortCategoriesForDisplay(customCategories);
       saveCategories();
       cacheTransactionsLocally();
       populateCategorySelects();
@@ -757,13 +801,13 @@ async function loadTransactions() {
 }
 
 function addTransaction(type) {
-  const desc = document.getElementById("desc").value.trim();
-  const amountValue = document.getElementById("amount").value;
-  const category = document.getElementById("category").value;
-  const notes = document.getElementById("notes").value.trim();
-  const transactionDate = document.getElementById("transactionDate").value;
-  const isRecurring = document.getElementById("isRecurring").value === "true";
-  const recurringInterval = document.getElementById("recurringInterval").value;
+  const desc = document.getElementById("desc")?.value.trim() || "";
+  const amountValue = document.getElementById("amount")?.value || "";
+  const category = normalizeOtherLabel(document.getElementById("category")?.value || "General");
+  const notes = document.getElementById("notes")?.value.trim() || "";
+  const transactionDate = document.getElementById("transactionDate")?.value || "";
+  const isRecurring = document.getElementById("isRecurring")?.value === "true";
+  const recurringInterval = document.getElementById("recurringInterval")?.value || "monthly";
   const now = Date.now();
 
   if (!validateTransaction(desc, amountValue, transactionDate)) return;
@@ -830,7 +874,8 @@ function undoDelete() {
     .add(copy)
     .then(() => {
       deletedTransactionCache = null;
-      document.getElementById("toast").classList.add("hidden");
+      const toast = document.getElementById("toast");
+      if (toast) toast.classList.add("hidden");
       showToast(t("restored"));
     })
     .catch((error) => {
@@ -842,30 +887,41 @@ function undoDelete() {
 function openEditModal(transaction) {
   populateCategorySelects();
 
-  document.getElementById("editId").value = transaction.id;
-  document.getElementById("editDesc").value = transaction.desc || "";
-  document.getElementById("editAmount").value = transaction.amount || "";
-  document.getElementById("editCategory").value = transaction.category || "General";
-  document.getElementById("editDate").value = formatDateForInput(transaction.timestamp);
-  document.getElementById("editRecurring").value = transaction.recurring ? "true" : "false";
-  document.getElementById("editRecurringInterval").value = transaction.recurringInterval || "monthly";
-  document.getElementById("editNotes").value = transaction.notes || "";
-  document.getElementById("editModal").classList.remove("hidden");
+  const editId = document.getElementById("editId");
+  const editDesc = document.getElementById("editDesc");
+  const editAmount = document.getElementById("editAmount");
+  const editCategory = document.getElementById("editCategory");
+  const editDate = document.getElementById("editDate");
+  const editRecurring = document.getElementById("editRecurring");
+  const editRecurringInterval = document.getElementById("editRecurringInterval");
+  const editNotes = document.getElementById("editNotes");
+  const editModal = document.getElementById("editModal");
+
+  if (editId) editId.value = transaction.id;
+  if (editDesc) editDesc.value = transaction.desc || "";
+  if (editAmount) editAmount.value = transaction.amount || "";
+  if (editCategory) editCategory.value = transaction.category || "General";
+  if (editDate) editDate.value = formatDateForInput(transaction.timestamp);
+  if (editRecurring) editRecurring.value = transaction.recurring ? "true" : "false";
+  if (editRecurringInterval) editRecurringInterval.value = transaction.recurringInterval || "monthly";
+  if (editNotes) editNotes.value = transaction.notes || "";
+  if (editModal) editModal.classList.remove("hidden");
 }
 
 function closeEditModal() {
-  document.getElementById("editModal").classList.add("hidden");
+  const editModal = document.getElementById("editModal");
+  if (editModal) editModal.classList.add("hidden");
 }
 
 function saveEditTransaction() {
-  const id = document.getElementById("editId").value;
-  const desc = document.getElementById("editDesc").value.trim();
-  const amountValue = document.getElementById("editAmount").value;
-  const category = document.getElementById("editCategory").value;
-  const dateValue = document.getElementById("editDate").value;
-  const recurring = document.getElementById("editRecurring").value === "true";
-  const recurringInterval = document.getElementById("editRecurringInterval").value;
-  const notes = document.getElementById("editNotes").value.trim();
+  const id = document.getElementById("editId")?.value || "";
+  const desc = document.getElementById("editDesc")?.value.trim() || "";
+  const amountValue = document.getElementById("editAmount")?.value || "";
+  const category = normalizeOtherLabel(document.getElementById("editCategory")?.value || "General");
+  const dateValue = document.getElementById("editDate")?.value || "";
+  const recurring = document.getElementById("editRecurring")?.value === "true";
+  const recurringInterval = document.getElementById("editRecurringInterval")?.value || "monthly";
+  const notes = document.getElementById("editNotes")?.value.trim() || "";
 
   if (!validateTransaction(desc, amountValue, dateValue)) return;
 
@@ -894,19 +950,19 @@ function saveEditTransaction() {
 }
 
 function getFilteredTransactions() {
-  const searchTerm = document.getElementById("searchInput").value.trim().toLowerCase();
-  const filterType = document.getElementById("filterType").value;
-  const filterCategory = document.getElementById("filterCategory").value;
-  const sortOption = document.getElementById("sortOption").value;
+  const searchTerm = (document.getElementById("searchInput")?.value || "").trim().toLowerCase();
+  const filterType = document.getElementById("filterType")?.value || "All";
+  const filterCategory = document.getElementById("filterCategory")?.value || "All";
+  const sortOption = document.getElementById("sortOption")?.value || "newest";
 
   let result = [...transactions];
 
   result = result.filter((transaction) => {
     const matchesSearch =
       !searchTerm ||
-      transaction.desc?.toLowerCase().includes(searchTerm) ||
-      transaction.notes?.toLowerCase().includes(searchTerm) ||
-      transaction.category?.toLowerCase().includes(searchTerm) ||
+      (transaction.desc || "").toLowerCase().includes(searchTerm) ||
+      (transaction.notes || "").toLowerCase().includes(searchTerm) ||
+      (transaction.category || "").toLowerCase().includes(searchTerm) ||
       translateCategory(transaction.category || "").toLowerCase().includes(searchTerm) ||
       formatDateTime(transaction.createdAt).toLowerCase().includes(searchTerm);
 
@@ -1003,39 +1059,47 @@ function calculateSummaryData(items) {
 }
 
 function applySummaryToElements(summary, ids) {
-  document.getElementById(ids.income).textContent = formatMoney(summary.income);
-  document.getElementById(ids.expenses).textContent = formatMoney(summary.expenses);
-
+  const incomeEl = document.getElementById(ids.income);
+  const expensesEl = document.getElementById(ids.expenses);
   const netEl = document.getElementById(ids.net);
-  netEl.textContent = `$${formatMoney(summary.net)}`;
-  netEl.classList.remove("net-positive", "net-negative");
-  netEl.classList.add(summary.net >= 0 ? "net-positive" : "net-negative");
-
   const highestIncomeEl = document.getElementById(ids.highestIncome);
   const highestIncomeDateEl = document.getElementById(ids.highestIncomeDate);
   const highestExpenseEl = document.getElementById(ids.highestExpense);
   const highestExpenseDateEl = document.getElementById(ids.highestExpenseDate);
 
-  if (summary.highestIncome) {
-    highestIncomeEl.textContent = `${summary.highestIncome.desc} — $${formatMoney(summary.highestIncome.amount)}`;
-    highestIncomeDateEl.textContent = formatDateTime(summary.highestIncome.createdAt);
-  } else {
-    highestIncomeEl.textContent = "None";
-    highestIncomeDateEl.textContent = t("noIncomeFound");
+  if (incomeEl) incomeEl.textContent = formatMoney(summary.income);
+  if (expensesEl) expensesEl.textContent = formatMoney(summary.expenses);
+
+  if (netEl) {
+    netEl.textContent = `$${formatMoney(summary.net)}`;
+    netEl.classList.remove("net-positive", "net-negative");
+    netEl.classList.add(summary.net >= 0 ? "net-positive" : "net-negative");
   }
 
-  if (summary.highestExpense) {
-    highestExpenseEl.textContent = `${summary.highestExpense.desc} — $${formatMoney(summary.highestExpense.amount)}`;
-    highestExpenseDateEl.textContent = formatDateTime(summary.highestExpense.createdAt);
-  } else {
-    highestExpenseEl.textContent = "None";
-    highestExpenseDateEl.textContent = t("noExpenseFound");
+  if (highestIncomeEl && highestIncomeDateEl) {
+    if (summary.highestIncome) {
+      highestIncomeEl.textContent = `${summary.highestIncome.desc} — $${formatMoney(summary.highestIncome.amount)}`;
+      highestIncomeDateEl.textContent = formatDateTime(summary.highestIncome.createdAt);
+    } else {
+      highestIncomeEl.textContent = "None";
+      highestIncomeDateEl.textContent = t("noIncomeFound");
+    }
+  }
+
+  if (highestExpenseEl && highestExpenseDateEl) {
+    if (summary.highestExpense) {
+      highestExpenseEl.textContent = `${summary.highestExpense.desc} — $${formatMoney(summary.highestExpense.amount)}`;
+      highestExpenseDateEl.textContent = formatDateTime(summary.highestExpense.createdAt);
+    } else {
+      highestExpenseEl.textContent = "None";
+      highestExpenseDateEl.textContent = t("noExpenseFound");
+    }
   }
 }
 
 function applyRangeSummary() {
-  const startValue = document.getElementById("rangeStart").value;
-  const endValue = document.getElementById("rangeEnd").value;
+  const startValue = document.getElementById("rangeStart")?.value || "";
+  const endValue = document.getElementById("rangeEnd")?.value || "";
 
   if (startValue && endValue && getStartOfDay(startValue) > getEndOfDay(endValue)) {
     alert(t("invalidRange"));
@@ -1050,8 +1114,12 @@ function applyRangeSummary() {
 function resetRangeSummary() {
   activeRangeStart = "";
   activeRangeEnd = "";
-  document.getElementById("rangeStart").value = "";
-  document.getElementById("rangeEnd").value = "";
+
+  const rangeStart = document.getElementById("rangeStart");
+  const rangeEnd = document.getElementById("rangeEnd");
+  if (rangeStart) rangeStart.value = "";
+  if (rangeEnd) rangeEnd.value = "";
+
   updateRangeSummary();
 }
 
@@ -1059,14 +1127,16 @@ function updateRangeSummary() {
   const labelEl = document.getElementById("selectedRangeLabel");
   const summary = calculateSummaryData(getTransactionsInRange(activeRangeStart, activeRangeEnd));
 
-  if (activeRangeStart && activeRangeEnd) {
-    labelEl.textContent = `${activeRangeStart} ${t("to")} ${activeRangeEnd}`;
-  } else if (activeRangeStart) {
-    labelEl.textContent = `${t("from")} ${activeRangeStart}`;
-  } else if (activeRangeEnd) {
-    labelEl.textContent = `${t("upTo")} ${activeRangeEnd}`;
-  } else {
-    labelEl.textContent = t("showingAllTransactions");
+  if (labelEl) {
+    if (activeRangeStart && activeRangeEnd) {
+      labelEl.textContent = `${activeRangeStart} ${t("to")} ${activeRangeEnd}`;
+    } else if (activeRangeStart) {
+      labelEl.textContent = `${t("from")} ${activeRangeStart}`;
+    } else if (activeRangeEnd) {
+      labelEl.textContent = `${t("upTo")} ${activeRangeEnd}`;
+    } else {
+      labelEl.textContent = t("showingAllTransactions");
+    }
   }
 
   applySummaryToElements(summary, {
@@ -1083,14 +1153,17 @@ function updateRangeSummary() {
 function updateMonthlySummary() {
   const monthPicker = document.getElementById("monthPicker");
   const selectedMonthLabel = document.getElementById("selectedMonthLabel");
-  let monthValue = monthPicker.value;
+  if (!monthPicker) return;
 
+  let monthValue = monthPicker.value;
   if (!monthValue) {
     monthValue = getCurrentMonthValue();
     monthPicker.value = monthValue;
   }
 
-  selectedMonthLabel.textContent = formatMonthLabel(monthValue);
+  if (selectedMonthLabel) {
+    selectedMonthLabel.textContent = formatMonthLabel(monthValue);
+  }
 
   const summary = calculateSummaryData(getTransactionsForMonth(monthValue));
 
@@ -1107,9 +1180,11 @@ function updateMonthlySummary() {
 
 function renderBudgetList() {
   const budgetList = document.getElementById("budgetList");
+  if (!budgetList) return;
+
   budgetList.innerHTML = "";
 
-  const monthValue = document.getElementById("monthPicker").value || getCurrentMonthValue();
+  const monthValue = document.getElementById("monthPicker")?.value || getCurrentMonthValue();
   const monthlyTransactions = getTransactionsForMonth(monthValue);
 
   const expenseTotals = {};
@@ -1173,6 +1248,8 @@ function renderBudgetList() {
 
 function renderCategoryTotals() {
   const container = document.getElementById("categoryTotalsList");
+  if (!container) return;
+
   container.innerHTML = "";
 
   const totals = {};
@@ -1219,25 +1296,25 @@ function renderCategoryTotals() {
 }
 
 function updateInsights() {
-  const currentMonth = getTransactionsForMonth(document.getElementById("monthPicker").value || getCurrentMonthValue());
+  const monthValue = document.getElementById("monthPicker")?.value || getCurrentMonthValue();
+  const currentMonth = getTransactionsForMonth(monthValue);
 
-  const monthPickerValue = document.getElementById("monthPicker").value || getCurrentMonthValue();
-  const [year, month] = monthPickerValue.split("-");
+  const [year, month] = monthValue.split("-");
   const previousMonthDate = new Date(Number(year), Number(month) - 2, 1);
   const prevMonthValue = `${previousMonthDate.getFullYear()}-${String(previousMonthDate.getMonth() + 1).padStart(2, "0")}`;
   const previousMonth = getTransactionsForMonth(prevMonthValue);
 
   const currentExpenseTotal = currentMonth
-    .filter((t) => t.type === "Expense")
-    .reduce((sum, t) => sum + Number(t.amount), 0);
+    .filter((item) => item.type === "Expense")
+    .reduce((sum, item) => sum + Number(item.amount), 0);
 
   const previousExpenseTotal = previousMonth
-    .filter((t) => t.type === "Expense")
-    .reduce((sum, t) => sum + Number(t.amount), 0);
+    .filter((item) => item.type === "Expense")
+    .reduce((sum, item) => sum + Number(item.amount), 0);
 
   const currentIncomeTotal = currentMonth
-    .filter((t) => t.type === "Income")
-    .reduce((sum, t) => sum + Number(t.amount), 0);
+    .filter((item) => item.type === "Income")
+    .reduce((sum, item) => sum + Number(item.amount), 0);
 
   const expenseByCategory = {};
   currentMonth.forEach((transaction) => {
@@ -1258,47 +1335,58 @@ function updateInsights() {
 
   const spendingChangeEl = document.getElementById("insightSpendingChange");
   const spendingDetailEl = document.getElementById("insightSpendingDetail");
-  if (previousExpenseTotal > 0) {
-    const pct = ((currentExpenseTotal - previousExpenseTotal) / previousExpenseTotal) * 100;
-    const sign = pct >= 0 ? "+" : "";
-    spendingChangeEl.textContent = `${sign}${pct.toFixed(1)}%`;
-    spendingDetailEl.textContent = t("vsLastMonth");
-  } else if (currentExpenseTotal > 0) {
-    spendingChangeEl.textContent = "+100.0%";
-    spendingDetailEl.textContent = t("vsLastMonth");
-  } else {
-    spendingChangeEl.textContent = "—";
-    spendingDetailEl.textContent = t("noDataYet");
-  }
-
   const topCategoryEl = document.getElementById("insightTopCategory");
   const topCategoryDetailEl = document.getElementById("insightTopCategoryDetail");
-  if (topCategoryEntry) {
-    topCategoryEl.textContent = translateCategory(topCategoryEntry[0]);
-    topCategoryDetailEl.textContent = `$${formatMoney(topCategoryEntry[1])}`;
-  } else {
-    topCategoryEl.textContent = "—";
-    topCategoryDetailEl.textContent = t("noDataYet");
-  }
-
-  document.getElementById("insightOverBudget").textContent = String(overBudgetCount);
-  document.getElementById("insightOverBudgetDetail").textContent = `${overBudgetCount} ${t("categoriesOver")}`;
-
+  const overBudgetEl = document.getElementById("insightOverBudget");
+  const overBudgetDetailEl = document.getElementById("insightOverBudgetDetail");
   const savingsRateEl = document.getElementById("insightSavingsRate");
   const savingsRateDetailEl = document.getElementById("insightSavingsRateDetail");
-  if (currentIncomeTotal > 0) {
-    const rate = ((currentIncomeTotal - currentExpenseTotal) / currentIncomeTotal) * 100;
-    savingsRateEl.textContent = `${rate.toFixed(1)}%`;
-    savingsRateDetailEl.textContent = t("ofIncomeSaved");
-  } else {
-    savingsRateEl.textContent = "—";
-    savingsRateDetailEl.textContent = t("noDataYet");
+
+  if (spendingChangeEl && spendingDetailEl) {
+    if (previousExpenseTotal > 0) {
+      const pct = ((currentExpenseTotal - previousExpenseTotal) / previousExpenseTotal) * 100;
+      const sign = pct >= 0 ? "+" : "";
+      spendingChangeEl.textContent = `${sign}${pct.toFixed(1)}%`;
+      spendingDetailEl.textContent = t("vsLastMonth");
+    } else if (currentExpenseTotal > 0) {
+      spendingChangeEl.textContent = "+100.0%";
+      spendingDetailEl.textContent = t("vsLastMonth");
+    } else {
+      spendingChangeEl.textContent = "—";
+      spendingDetailEl.textContent = t("noDataYet");
+    }
+  }
+
+  if (topCategoryEl && topCategoryDetailEl) {
+    if (topCategoryEntry) {
+      topCategoryEl.textContent = translateCategory(topCategoryEntry[0]);
+      topCategoryDetailEl.textContent = `$${formatMoney(topCategoryEntry[1])}`;
+    } else {
+      topCategoryEl.textContent = "—";
+      topCategoryDetailEl.textContent = t("noDataYet");
+    }
+  }
+
+  if (overBudgetEl && overBudgetDetailEl) {
+    overBudgetEl.textContent = String(overBudgetCount);
+    overBudgetDetailEl.textContent = `${overBudgetCount} ${t("categoriesOver")}`;
+  }
+
+  if (savingsRateEl && savingsRateDetailEl) {
+    if (currentIncomeTotal > 0) {
+      const rate = ((currentIncomeTotal - currentExpenseTotal) / currentIncomeTotal) * 100;
+      savingsRateEl.textContent = `${rate.toFixed(1)}%`;
+      savingsRateDetailEl.textContent = t("ofIncomeSaved");
+    } else {
+      savingsRateEl.textContent = "—";
+      savingsRateDetailEl.textContent = t("noDataYet");
+    }
   }
 }
 
 function renderMonthlyTrendChart() {
   const canvas = document.getElementById("monthlyTrendChart");
-  if (!canvas) return;
+  if (!canvas || typeof Chart === "undefined") return;
 
   const grouped = {};
 
@@ -1366,7 +1454,7 @@ function renderMonthlyTrendChart() {
 
 function renderCategoryExpenseChart() {
   const canvas = document.getElementById("categoryExpenseChart");
-  if (!canvas) return;
+  if (!canvas || typeof Chart === "undefined") return;
 
   const totals = {};
   transactions.forEach((transaction) => {
@@ -1441,16 +1529,22 @@ function exportCsv() {
 }
 
 function clearFilters() {
-  document.getElementById("searchInput").value = "";
-  document.getElementById("filterType").value = "All";
-  document.getElementById("filterCategory").value = "All";
-  document.getElementById("sortOption").value = "newest";
+  const searchInput = document.getElementById("searchInput");
+  const filterType = document.getElementById("filterType");
+  const filterCategory = document.getElementById("filterCategory");
+  const sortOption = document.getElementById("sortOption");
+
+  if (searchInput) searchInput.value = "";
+  if (filterType) filterType.value = "All";
+  if (filterCategory) filterCategory.value = "All";
+  if (sortOption) sortOption.value = "newest";
+
   updateUI();
 }
 
 function saveBudget() {
-  const category = document.getElementById("budgetCategory").value;
-  const amountValue = document.getElementById("budgetAmount").value;
+  const category = normalizeOtherLabel(document.getElementById("budgetCategory")?.value || "General");
+  const amountValue = document.getElementById("budgetAmount")?.value || "";
 
   if (amountValue === "" || Number.isNaN(Number(amountValue)) || Number(amountValue) < 0) {
     alert(t("budgetInvalid"));
@@ -1459,14 +1553,17 @@ function saveBudget() {
 
   budgets[category] = Number(amountValue);
   localStorage.setItem("budgets", JSON.stringify(budgets));
-  document.getElementById("budgetAmount").value = "";
+
+  const budgetAmount = document.getElementById("budgetAmount");
+  if (budgetAmount) budgetAmount.value = "";
+
   renderBudgetList();
   updateInsights();
   showToast(t("transactionSaved"));
 }
 
 function refreshLanguageSensitiveSelects() {
-  Array.from(document.querySelectorAll("option[data-i18n]")).forEach((option) => {
+  document.querySelectorAll("option[data-i18n]").forEach((option) => {
     const key = option.getAttribute("data-i18n");
     option.textContent = t(key);
   });
@@ -1544,7 +1641,7 @@ async function processRecurringTransactions() {
   recurringProcessing = true;
 
   try {
-    const templates = transactions.filter((t) => t.recurring && !t.recurringGenerated);
+    const templates = transactions.filter((item) => item.recurring && !item.recurringGenerated);
     if (templates.length === 0) return;
 
     const batchAdds = [];
@@ -1562,8 +1659,8 @@ async function processRecurringTransactions() {
         if (nextTimestamp > today) break;
 
         const generatedForDate = getDayKey(nextTimestamp);
-        const exists = transactions.some((t) =>
-          t.generatedFromBaseId === template.id && t.generatedForDate === generatedForDate
+        const exists = transactions.some(
+          (item) => item.generatedFromBaseId === template.id && item.generatedForDate === generatedForDate
         );
 
         if (!exists) {
@@ -1604,9 +1701,11 @@ function registerServiceWorker() {
 
 function updateUI() {
   translateStaticText();
-  populateCategorySelects();
+  refreshLanguageSensitiveSelects();
 
   const list = document.getElementById("list");
+  if (!list) return;
+
   list.innerHTML = "";
 
   let balance = 0;
@@ -1623,9 +1722,13 @@ function updateUI() {
     }
   });
 
-  document.getElementById("balance").textContent = `$${formatMoney(balance)}`;
-  document.getElementById("income").textContent = formatMoney(income);
-  document.getElementById("expenses").textContent = formatMoney(expenses);
+  const balanceEl = document.getElementById("balance");
+  const incomeEl = document.getElementById("income");
+  const expensesEl = document.getElementById("expenses");
+
+  if (balanceEl) balanceEl.textContent = `$${formatMoney(balance)}`;
+  if (incomeEl) incomeEl.textContent = formatMoney(income);
+  if (expensesEl) expensesEl.textContent = formatMoney(expenses);
 
   const filteredTransactions = getFilteredTransactions();
 
@@ -1651,43 +1754,48 @@ function updateUI() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("transactionDate").value = getTodayInputValue();
+  customCategories = customCategories.map(normalizeOtherLabel);
+  customCategories = sortCategoriesForDisplay(customCategories);
+  saveCategories();
+
+  const transactionDate = document.getElementById("transactionDate");
+  const monthPicker = document.getElementById("monthPicker");
+  if (transactionDate) transactionDate.value = getTodayInputValue();
+  if (monthPicker) monthPicker.value = getCurrentMonthValue();
 
   populateCategorySelects();
-
-  document.getElementById("monthPicker").value = getCurrentMonthValue();
-
   loadCachedTransactions();
   registerServiceWorker();
 
-  document.getElementById("monthPicker").addEventListener("change", () => {
+  document.getElementById("monthPicker")?.addEventListener("change", () => {
     updateMonthlySummary();
     updateInsights();
     renderBudgetList();
   });
-  document.getElementById("searchInput").addEventListener("input", updateUI);
-  document.getElementById("filterType").addEventListener("change", updateUI);
-  document.getElementById("filterCategory").addEventListener("change", updateUI);
-  document.getElementById("sortOption").addEventListener("change", updateUI);
-  document.getElementById("clearFiltersBtn").addEventListener("click", clearFilters);
-  document.getElementById("exportCsvBtn").addEventListener("click", exportCsv);
-  document.getElementById("saveBudgetBtn").addEventListener("click", saveBudget);
-  document.getElementById("undoDeleteBtn").addEventListener("click", undoDelete);
 
-  document.getElementById("addCategoryBtn").addEventListener("click", addCustomCategory);
-  document.getElementById("newCategoryInput").addEventListener("keydown", (event) => {
+  document.getElementById("searchInput")?.addEventListener("input", updateUI);
+  document.getElementById("filterType")?.addEventListener("change", updateUI);
+  document.getElementById("filterCategory")?.addEventListener("change", updateUI);
+  document.getElementById("sortOption")?.addEventListener("change", updateUI);
+  document.getElementById("clearFiltersBtn")?.addEventListener("click", clearFilters);
+  document.getElementById("exportCsvBtn")?.addEventListener("click", exportCsv);
+  document.getElementById("saveBudgetBtn")?.addEventListener("click", saveBudget);
+  document.getElementById("undoDeleteBtn")?.addEventListener("click", undoDelete);
+
+  document.getElementById("addCategoryBtn")?.addEventListener("click", addCustomCategory);
+  document.getElementById("newCategoryInput")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       addCustomCategory();
     }
   });
 
-  document.getElementById("closeEditModalBtn").addEventListener("click", closeEditModal);
-  document.getElementById("cancelEditBtn").addEventListener("click", closeEditModal);
-  document.getElementById("editModalBackdrop").addEventListener("click", closeEditModal);
-  document.getElementById("saveEditBtn").addEventListener("click", saveEditTransaction);
+  document.getElementById("closeEditModalBtn")?.addEventListener("click", closeEditModal);
+  document.getElementById("cancelEditBtn")?.addEventListener("click", closeEditModal);
+  document.getElementById("editModalBackdrop")?.addEventListener("click", closeEditModal);
+  document.getElementById("saveEditBtn")?.addEventListener("click", saveEditTransaction);
 
-  document.getElementById("themeToggleBtn").addEventListener("click", () => {
+  document.getElementById("themeToggleBtn")?.addEventListener("click", () => {
     const body = document.body;
     const nextTheme = body.getAttribute("data-theme") === "dark" ? "light" : "dark";
     body.setAttribute("data-theme", nextTheme);
@@ -1695,7 +1803,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateUI();
   });
 
-  document.getElementById("languageToggleBtn").addEventListener("click", () => {
+  document.getElementById("languageToggleBtn")?.addEventListener("click", () => {
     currentLanguage = currentLanguage === "en" ? "es" : "en";
     localStorage.setItem("language", currentLanguage);
     updateUI();
