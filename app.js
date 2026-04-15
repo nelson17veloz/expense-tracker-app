@@ -46,8 +46,8 @@ const translations = {
     type: "Type",
     all: "All",
     sort: "Sort",
-    newest: "Newest",
-    oldest: "Oldest",
+    newest: "Last uploaded → First",
+    oldest: "First uploaded → Last",
     highestAmount: "Highest Amount",
     lowestAmount: "Lowest Amount",
     az: "A-Z",
@@ -110,11 +110,14 @@ const translations = {
     entertainment: "Entertainment",
     shopping: "Shopping",
     salary: "Salary",
-    Studio: "Studio",
+    freelance: "Freelance",
     other: "Other",
     spent: "Spent",
     remaining: "Remaining",
-    overBudgetBy: "Over budget by"
+    overBudgetBy: "Over budget by",
+    today: "Today",
+    yesterday: "Yesterday",
+    at: "at"
   },
   es: {
     eyebrow: "Finanzas Personales",
@@ -141,8 +144,8 @@ const translations = {
     type: "Tipo",
     all: "Todos",
     sort: "Ordenar",
-    newest: "Más Reciente",
-    oldest: "Más Antiguo",
+    newest: "Último subido → Primero",
+    oldest: "Primero subido → Último",
     highestAmount: "Cantidad Más Alta",
     lowestAmount: "Cantidad Más Baja",
     az: "A-Z",
@@ -205,11 +208,14 @@ const translations = {
     entertainment: "Entretenimiento",
     shopping: "Compras",
     salary: "Salario",
-    Studio: "Studio",
+    freelance: "Trabajo Independiente",
     other: "Otro",
     spent: "Gastado",
     remaining: "Restante",
-    overBudgetBy: "Pasado del presupuesto por"
+    overBudgetBy: "Pasado del presupuesto por",
+    today: "Hoy",
+    yesterday: "Ayer",
+    at: "a las"
   }
 };
 
@@ -222,7 +228,7 @@ const categoryTranslationKeys = {
   Entertainment: "entertainment",
   Shopping: "shopping",
   Salary: "salary",
-  Studio: "studio",
+  Freelance: "freelance",
   Other: "other"
 };
 
@@ -264,10 +270,23 @@ function formatMoney(value) {
 }
 
 function formatDate(timestamp) {
-  if (!timestamp) return "No date";
+  if (!timestamp) return "";
   return new Date(Number(timestamp)).toLocaleDateString(
     currentLanguage === "es" ? "es-ES" : undefined
   );
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) return "";
+  return new Date(Number(timestamp)).toLocaleTimeString(
+    currentLanguage === "es" ? "es-ES" : undefined,
+    { hour: "numeric", minute: "2-digit" }
+  );
+}
+
+function formatDateTime(timestamp) {
+  if (!timestamp) return "";
+  return `${formatDate(timestamp)} ${t("at")} ${formatTime(timestamp)}`;
 }
 
 function formatDateForInput(timestamp) {
@@ -303,6 +322,35 @@ function getStartOfDay(dateString) {
 
 function getEndOfDay(dateString) {
   return new Date(`${dateString}T23:59:59.999`).getTime();
+}
+
+function getDayKey(timestamp) {
+  const date = new Date(Number(timestamp));
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getDayLabel(timestamp) {
+  const date = new Date(Number(timestamp));
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  const todayKey = getDayKey(today.getTime());
+  const yesterdayKey = getDayKey(yesterday.getTime());
+  const dateKey = getDayKey(timestamp);
+
+  if (dateKey === todayKey) return t("today");
+  if (dateKey === yesterdayKey) return t("yesterday");
+
+  return date.toLocaleDateString(currentLanguage === "es" ? "es-ES" : undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  });
 }
 
 function getChartColors() {
@@ -369,17 +417,25 @@ function toggleSection(sectionId, button) {
   button.classList.toggle("open", !isOpen);
 }
 
+function normalizeTransaction(docId, data) {
+  const fallbackTimestamp = data.createdAt || data.timestamp || Date.now();
+
+  return {
+    id: docId,
+    ...data,
+    timestamp: Number(data.timestamp || fallbackTimestamp),
+    createdAt: Number(data.createdAt || fallbackTimestamp),
+    updatedAt: Number(data.updatedAt || fallbackTimestamp)
+  };
+}
+
 function loadTransactions() {
   db.collection("transactions")
-    .orderBy("timestamp", "desc")
     .onSnapshot(
       (snapshot) => {
         transactions = [];
         snapshot.forEach((doc) => {
-          transactions.push({
-            id: doc.id,
-            ...doc.data()
-          });
+          transactions.push(normalizeTransaction(doc.id, doc.data()));
         });
         updateUI();
       },
@@ -400,6 +456,8 @@ function addTransaction(type) {
 
   if (!validateTransaction(desc, amountValue, transactionDate)) return;
 
+  const now = Date.now();
+
   db.collection("transactions")
     .add({
       type,
@@ -409,7 +467,8 @@ function addTransaction(type) {
       notes,
       recurring: isRecurring,
       timestamp: getStartOfDay(transactionDate),
-      createdAt: Date.now()
+      createdAt: now,
+      updatedAt: now
     })
     .then(() => {
       clearInputs();
@@ -513,7 +572,8 @@ function saveEditTransaction() {
       category,
       notes,
       recurring,
-      timestamp: getStartOfDay(dateValue)
+      timestamp: getStartOfDay(dateValue),
+      updatedAt: Date.now()
     })
     .then(() => {
       closeEditModal();
@@ -537,7 +597,8 @@ function getFilteredTransactions() {
       !searchTerm ||
       transaction.desc?.toLowerCase().includes(searchTerm) ||
       transaction.notes?.toLowerCase().includes(searchTerm) ||
-      transaction.category?.toLowerCase().includes(searchTerm);
+      transaction.category?.toLowerCase().includes(searchTerm) ||
+      formatDateTime(transaction.createdAt).toLowerCase().includes(searchTerm);
 
     const matchesType = filterType === "All" || transaction.type === filterType;
     const matchesCategory = filterCategory === "All" || transaction.category === filterCategory;
@@ -546,16 +607,38 @@ function getFilteredTransactions() {
   });
 
   result.sort((a, b) => {
-    if (sortOption === "newest") return Number(b.timestamp) - Number(a.timestamp);
-    if (sortOption === "oldest") return Number(a.timestamp) - Number(b.timestamp);
+    if (sortOption === "newest") return Number(b.createdAt) - Number(a.createdAt);
+    if (sortOption === "oldest") return Number(a.createdAt) - Number(b.createdAt);
     if (sortOption === "highest") return Number(b.amount) - Number(a.amount);
     if (sortOption === "lowest") return Number(a.amount) - Number(b.amount);
     if (sortOption === "az") return (a.desc || "").localeCompare(b.desc || "");
     if (sortOption === "za") return (b.desc || "").localeCompare(a.desc || "");
-    return 0;
+    return Number(b.createdAt) - Number(a.createdAt);
   });
 
   return result;
+}
+
+function groupTransactionsByDay(items) {
+  const groups = [];
+  let currentGroup = null;
+
+  items.forEach((transaction) => {
+    const dayKey = getDayKey(transaction.timestamp);
+
+    if (!currentGroup || currentGroup.dayKey !== dayKey) {
+      currentGroup = {
+        dayKey,
+        label: getDayLabel(transaction.timestamp),
+        items: []
+      };
+      groups.push(currentGroup);
+    }
+
+    currentGroup.items.push(transaction);
+  });
+
+  return groups;
 }
 
 function getTransactionsInRange(startDate, endDate) {
@@ -625,7 +708,7 @@ function applySummaryToElements(summary, ids) {
 
   if (summary.highestIncome) {
     highestIncomeEl.textContent = `${summary.highestIncome.desc} — $${formatMoney(summary.highestIncome.amount)}`;
-    highestIncomeDateEl.textContent = formatDate(summary.highestIncome.timestamp);
+    highestIncomeDateEl.textContent = formatDateTime(summary.highestIncome.createdAt);
   } else {
     highestIncomeEl.textContent = "None";
     highestIncomeDateEl.textContent = t("noIncomeFound");
@@ -633,7 +716,7 @@ function applySummaryToElements(summary, ids) {
 
   if (summary.highestExpense) {
     highestExpenseEl.textContent = `${summary.highestExpense.desc} — $${formatMoney(summary.highestExpense.amount)}`;
-    highestExpenseDateEl.textContent = formatDate(summary.highestExpense.timestamp);
+    highestExpenseDateEl.textContent = formatDateTime(summary.highestExpense.createdAt);
   } else {
     highestExpenseEl.textContent = "None";
     highestExpenseDateEl.textContent = t("noExpenseFound");
@@ -951,15 +1034,7 @@ function renderCategoryExpenseChart() {
 
 function exportCsv() {
   const rows = [
-    [
-      t("type"),
-      t("description"),
-      t("amount"),
-      t("category"),
-      t("date"),
-      t("recurring"),
-      t("notes")
-    ]
+    [t("type"), t("description"), t("amount"), t("category"), t("date"), t("recurring"), t("notes")]
   ];
 
   getFilteredTransactions().forEach((transaction) => {
@@ -968,7 +1043,7 @@ function exportCsv() {
       transaction.desc || "",
       formatMoney(transaction.amount),
       translateCategory(transaction.category || ""),
-      formatDate(transaction.timestamp),
+      formatDateTime(transaction.createdAt),
       transaction.recurring ? t("yes") : t("no"),
       (transaction.notes || "").replace(/\n/g, " ")
     ]);
@@ -1013,9 +1088,7 @@ function saveBudget() {
 function refreshLanguageSensitiveSelects() {
   Array.from(document.querySelectorAll("option")).forEach((option) => {
     const value = option.value;
-    if (value in categoryTranslationKeys) {
-      option.textContent = translateCategory(value);
-    }
+    if (value in categoryTranslationKeys) option.textContent = translateCategory(value);
     if (value === "All") option.textContent = t("all");
     if (value === "Income") option.textContent = t("income");
     if (value === "Expense") option.textContent = t("expense");
@@ -1028,6 +1101,71 @@ function refreshLanguageSensitiveSelects() {
     if (value === "az") option.textContent = t("az");
     if (value === "za") option.textContent = t("za");
   });
+}
+
+function createDayHeader(label) {
+  const header = document.createElement("li");
+  header.className = "transaction-day-group";
+  header.innerHTML = `<div class="transaction-day-title">${label}</div>`;
+  return header;
+}
+
+function createTransactionItem(transaction) {
+  const li = document.createElement("li");
+  li.className = `transaction-item ${transaction.type === "Income" ? "income" : "expense"}`;
+
+  const left = document.createElement("div");
+  left.className = "transaction-left";
+
+  const title = document.createElement("p");
+  title.className = "transaction-title";
+  title.textContent = transaction.desc;
+
+  const meta = document.createElement("p");
+  meta.className = "transaction-meta";
+  meta.textContent =
+    `${transaction.type === "Income" ? t("income") : t("expense")} • ${translateCategory(transaction.category || "General")} • ${formatTime(transaction.createdAt)}${transaction.recurring ? ` • ${t("recurringLabel")}` : ""}`;
+
+  left.appendChild(title);
+  left.appendChild(meta);
+
+  if (transaction.notes) {
+    const notes = document.createElement("p");
+    notes.className = "transaction-notes";
+    notes.textContent = transaction.notes;
+    left.appendChild(notes);
+  }
+
+  const right = document.createElement("div");
+  right.className = "transaction-right";
+
+  const amount = document.createElement("span");
+  amount.className = `transaction-amount ${transaction.type === "Income" ? "income-text" : "expense-text"}`;
+  amount.textContent = `${transaction.type === "Income" ? "+" : "-"}$${formatMoney(transaction.amount)}`;
+
+  const editBtn = document.createElement("button");
+  editBtn.className = "small-btn edit-btn";
+  editBtn.type = "button";
+  editBtn.textContent = "✏️";
+  editBtn.onclick = () => openEditModal(transaction);
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "small-btn delete-btn";
+  deleteBtn.type = "button";
+  deleteBtn.textContent = "🗑️";
+  deleteBtn.onclick = () => {
+    const confirmed = confirm(t("confirmDelete"));
+    if (confirmed) deleteTransaction(transaction.id);
+  };
+
+  right.appendChild(amount);
+  right.appendChild(editBtn);
+  right.appendChild(deleteBtn);
+
+  li.appendChild(left);
+  li.appendChild(right);
+
+  return li;
 }
 
 function updateUI() {
@@ -1059,63 +1197,15 @@ function updateUI() {
 
   if (filteredTransactions.length === 0) {
     list.innerHTML = `<li class="empty-state">${t("noTransactionsFound")}</li>`;
+  } else {
+    const grouped = groupTransactionsByDay(filteredTransactions);
+    grouped.forEach((group) => {
+      list.appendChild(createDayHeader(group.label));
+      group.items.forEach((transaction) => {
+        list.appendChild(createTransactionItem(transaction));
+      });
+    });
   }
-
-  filteredTransactions.forEach((transaction) => {
-    const li = document.createElement("li");
-    li.className = `transaction-item ${transaction.type === "Income" ? "income" : "expense"}`;
-
-    const left = document.createElement("div");
-    left.className = "transaction-left";
-
-    const title = document.createElement("p");
-    title.className = "transaction-title";
-    title.textContent = transaction.desc;
-
-    const meta = document.createElement("p");
-    meta.className = "transaction-meta";
-    meta.textContent = `${transaction.type === "Income" ? t("income") : t("expense")} • ${translateCategory(transaction.category || "General")} • ${formatDate(transaction.timestamp)}${transaction.recurring ? ` • ${t("recurringLabel")}` : ""}`;
-
-    left.appendChild(title);
-    left.appendChild(meta);
-
-    if (transaction.notes) {
-      const notes = document.createElement("p");
-      notes.className = "transaction-notes";
-      notes.textContent = transaction.notes;
-      left.appendChild(notes);
-    }
-
-    const right = document.createElement("div");
-    right.className = "transaction-right";
-
-    const amount = document.createElement("span");
-    amount.className = `transaction-amount ${transaction.type === "Income" ? "income-text" : "expense-text"}`;
-    amount.textContent = `${transaction.type === "Income" ? "+" : "-"}$${formatMoney(transaction.amount)}`;
-
-    const editBtn = document.createElement("button");
-    editBtn.className = "small-btn edit-btn";
-    editBtn.type = "button";
-    editBtn.textContent = "✏️";
-    editBtn.onclick = () => openEditModal(transaction);
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "small-btn delete-btn";
-    deleteBtn.type = "button";
-    deleteBtn.textContent = "🗑️";
-    deleteBtn.onclick = () => {
-      const confirmed = confirm(t("confirmDelete"));
-      if (confirmed) deleteTransaction(transaction.id);
-    };
-
-    right.appendChild(amount);
-    right.appendChild(editBtn);
-    right.appendChild(deleteBtn);
-
-    li.appendChild(left);
-    li.appendChild(right);
-    list.appendChild(li);
-  });
 
   updateRangeSummary();
   updateMonthlySummary();
