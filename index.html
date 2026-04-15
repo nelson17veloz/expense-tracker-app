@@ -10,7 +10,6 @@
 
   <link rel="stylesheet" href="style.css" />
 
-  <!-- App Icons -->
   <link rel="icon" type="image/png" sizes="32x32" href="Icon.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="Icon.png" />
   <link rel="apple-touch-icon" href="Icon.png" />
@@ -25,14 +24,14 @@
   <div class="background-overlay"></div>
 
   <div id="toast" class="toast hidden">
-    <span id="toastMessage">Transaction deleted.</span>
-    <button id="undoDeleteBtn" type="button">Undo</button>
+    <span id="toastMessage">Saved</span>
+    <button id="undoDeleteBtn" type="button" class="hidden">Undo</button>
   </div>
 
   <main class="app-shell">
     <div class="app-layout">
       <section class="main-column">
-        <section class="hero-card">
+        <section class="hero-card fade-in">
           <div class="hero-top">
             <div class="hero-copy">
               <p class="eyebrow" data-i18n="eyebrow">Personal Finance</p>
@@ -43,12 +42,19 @@
             </div>
 
             <div class="hero-actions">
-              <button class="language-toggle-btn" id="languageToggleBtn" type="button">
-                ES
-              </button>
+              <button class="language-toggle-btn" id="languageToggleBtn" type="button">ES</button>
               <button class="theme-toggle-btn" id="themeToggleBtn" type="button" data-i18n="toggleTheme">
                 Toggle Theme
               </button>
+            </div>
+          </div>
+
+          <div class="status-row">
+            <div id="connectionBadge" class="status-badge online" data-i18n="online">
+              Online
+            </div>
+            <div id="syncBadge" class="status-badge neutral" data-i18n="ready">
+              Ready
             </div>
           </div>
 
@@ -70,7 +76,7 @@
           </div>
         </section>
 
-        <section class="card form-card">
+        <section class="card form-card fade-in">
           <div class="section-header">
             <h3 data-i18n="addTransaction">Add Transaction</h3>
           </div>
@@ -88,22 +94,21 @@
 
             <div class="input-group">
               <label for="category" data-i18n="category">Category</label>
-              <select id="category">
-                <option value="General">General</option>
-                <option value="Food">Food</option>
-                <option value="Bills">Bills</option>
-                <option value="Gas">Gas</option>
-                <option value="Rent">Rent</option>
-                <option value="Entertainment">Entertainment</option>
-                <option value="Shopping">Shopping</option>
-                <option value="Salary">Salary</option>
-                <option value="Studio">Studio</option>
-                <option value="Other">Other</option>
-              </select>
+              <select id="category"></select>
             </div>
           </div>
 
-          <div class="two-column-grid">
+          <div class="input-group">
+            <label for="newCategoryInput" data-i18n="newCategory">New Category</label>
+            <div class="category-create-row">
+              <input type="text" id="newCategoryInput" maxlength="30" />
+              <button class="secondary-btn" type="button" id="addCategoryBtn" data-i18n="addCategory">
+                Add
+              </button>
+            </div>
+          </div>
+
+          <div class="three-column-grid">
             <div class="input-group">
               <label for="transactionDate" data-i18n="date">Date</label>
               <input type="date" id="transactionDate" />
@@ -114,6 +119,14 @@
               <select id="isRecurring">
                 <option value="false" data-i18n="no">No</option>
                 <option value="true" data-i18n="yes">Yes</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="recurringInterval" data-i18n="repeatEvery">Repeat</label>
+              <select id="recurringInterval">
+                <option value="monthly" data-i18n="monthly">Monthly</option>
+                <option value="weekly" data-i18n="weekly">Weekly</option>
               </select>
             </div>
           </div>
@@ -133,7 +146,39 @@
           </div>
         </section>
 
-        <section class="card controls-card">
+        <section class="card insights-card fade-in">
+          <div class="section-header">
+            <h3 data-i18n="smartInsights">Smart Insights</h3>
+          </div>
+
+          <div class="insights-grid">
+            <div class="mini-stat">
+              <span data-i18n="spendingChange">Spending Change</span>
+              <strong id="insightSpendingChange">—</strong>
+              <small id="insightSpendingDetail">—</small>
+            </div>
+
+            <div class="mini-stat">
+              <span data-i18n="topExpenseCategory">Top Expense Category</span>
+              <strong id="insightTopCategory">—</strong>
+              <small id="insightTopCategoryDetail">—</small>
+            </div>
+
+            <div class="mini-stat">
+              <span data-i18n="overBudget">Over Budget</span>
+              <strong id="insightOverBudget">0</strong>
+              <small id="insightOverBudgetDetail">—</small>
+            </div>
+
+            <div class="mini-stat">
+              <span data-i18n="savingsRate">Savings Rate</span>
+              <strong id="insightSavingsRate">—</strong>
+              <small id="insightSavingsRateDetail">—</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="card controls-card fade-in">
           <div class="section-header">
             <h3 data-i18n="searchFilters">Search & Filters</h3>
           </div>
@@ -155,26 +200,14 @@
 
             <div class="input-group">
               <label for="filterCategory" data-i18n="category">Category</label>
-              <select id="filterCategory">
-                <option value="All" data-i18n="all">All</option>
-                <option value="General">General</option>
-                <option value="Food">Food</option>
-                <option value="Bills">Bills</option>
-                <option value="Gas">Gas</option>
-                <option value="Rent">Rent</option>
-                <option value="Entertainment">Entertainment</option>
-                <option value="Shopping">Shopping</option>
-                <option value="Salary">Salary</option>
-                <option value="Studio">Studio</option>
-                <option value="Other">Other</option>
-              </select>
+              <select id="filterCategory"></select>
             </div>
 
             <div class="input-group">
               <label for="sortOption" data-i18n="sort">Sort</label>
               <select id="sortOption">
-                <option value="newest" data-i18n="newest">Newest</option>
-                <option value="oldest" data-i18n="oldest">Oldest</option>
+                <option value="newest" data-i18n="newest">Last uploaded → First</option>
+                <option value="oldest" data-i18n="oldest">First uploaded → Last</option>
                 <option value="highest" data-i18n="highestAmount">Highest Amount</option>
                 <option value="lowest" data-i18n="lowestAmount">Lowest Amount</option>
                 <option value="az" data-i18n="az">A-Z</option>
@@ -193,7 +226,7 @@
           </div>
         </section>
 
-        <section class="card budget-card">
+        <section class="card budget-card fade-in">
           <div class="section-header">
             <h3 data-i18n="budgetGoals">Budget Goals</h3>
           </div>
@@ -201,15 +234,7 @@
           <div class="two-column-grid">
             <div class="input-group">
               <label for="budgetCategory" data-i18n="category">Category</label>
-              <select id="budgetCategory">
-                <option value="Food">Food</option>
-                <option value="Bills">Bills</option>
-                <option value="Gas">Gas</option>
-                <option value="Rent">Rent</option>
-                <option value="Entertainment">Entertainment</option>
-                <option value="Shopping">Shopping</option>
-                <option value="Other">Other</option>
-              </select>
+              <select id="budgetCategory"></select>
             </div>
 
             <div class="input-group">
@@ -227,7 +252,7 @@
           <div id="budgetList" class="stack-list"></div>
         </section>
 
-        <section class="card collapsible-card">
+        <section class="card collapsible-card fade-in">
           <button class="collapse-toggle" type="button" onclick="toggleSection('rangeSummaryContent', this)">
             <span data-i18n="customRangeSummary">Custom Range Summary</span>
             <span class="collapse-icon">⌄</span>
@@ -288,7 +313,7 @@
           </div>
         </section>
 
-        <section class="card collapsible-card">
+        <section class="card collapsible-card fade-in">
           <button class="collapse-toggle" type="button" onclick="toggleSection('monthlySummaryContent', this)">
             <span data-i18n="monthlySummary">Monthly Summary</span>
             <span class="collapse-icon">⌄</span>
@@ -333,7 +358,7 @@
           </div>
         </section>
 
-        <section class="card dashboard-card">
+        <section class="card dashboard-card fade-in">
           <div class="section-header">
             <h3 data-i18n="charts">Charts</h3>
           </div>
@@ -355,14 +380,14 @@
       </section>
 
       <aside class="side-column">
-        <section class="card dashboard-card sticky-panel">
+        <section class="card dashboard-card sticky-panel fade-in">
           <div class="section-header">
             <h3 data-i18n="categoryTotals">Category Totals</h3>
           </div>
           <div id="categoryTotalsList" class="stack-list"></div>
         </section>
 
-        <section class="card list-card sticky-panel">
+        <section class="card list-card sticky-panel fade-in">
           <div class="section-header">
             <h3 data-i18n="transactions">Transactions</h3>
           </div>
@@ -395,22 +420,11 @@
 
         <div class="input-group">
           <label for="editCategory" data-i18n="category">Category</label>
-          <select id="editCategory">
-            <option value="General">General</option>
-            <option value="Food">Food</option>
-            <option value="Bills">Bills</option>
-            <option value="Gas">Gas</option>
-            <option value="Rent">Rent</option>
-            <option value="Entertainment">Entertainment</option>
-            <option value="Shopping">Shopping</option>
-            <option value="Salary">Salary</option>
-            <option value="Studio">Studio</option>
-            <option value="Other">Other</option>
-          </select>
+          <select id="editCategory"></select>
         </div>
       </div>
 
-      <div class="two-column-grid">
+      <div class="three-column-grid">
         <div class="input-group">
           <label for="editDate" data-i18n="date">Date</label>
           <input type="date" id="editDate" />
@@ -421,6 +435,14 @@
           <select id="editRecurring">
             <option value="false" data-i18n="no">No</option>
             <option value="true" data-i18n="yes">Yes</option>
+          </select>
+        </div>
+
+        <div class="input-group">
+          <label for="editRecurringInterval" data-i18n="repeatEvery">Repeat</label>
+          <select id="editRecurringInterval">
+            <option value="monthly" data-i18n="monthly">Monthly</option>
+            <option value="weekly" data-i18n="weekly">Weekly</option>
           </select>
         </div>
       </div>
