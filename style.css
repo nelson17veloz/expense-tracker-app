@@ -700,7 +700,7 @@ input[type="number"] {
 }
 
 .combined-transactions-card {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .combined-list-title-row {
@@ -734,9 +734,8 @@ input[type="number"] {
   list-style: none;
   padding: 0;
   margin: 0;
-  max-height: 1120px;
-  overflow: auto;
-  scrollbar-width: thin;
+  max-height: none;
+  overflow: visible;
 }
 
 .transaction-day-group {
@@ -755,12 +754,22 @@ input[type="number"] {
 
 .transaction-item,
 .stack-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+
+  width: 100%;
+  min-width: 0;
+
   padding: 13px;
   margin-top: 10px;
+
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.045);
+
+  overflow: visible;
 }
 
 .stack-item {
@@ -777,7 +786,9 @@ input[type="number"] {
 
 .transaction-left,
 .stack-item-main {
+  width: 100%;
   min-width: 0;
+  overflow: visible;
 }
 
 .transaction-title,
@@ -791,23 +802,40 @@ input[type="number"] {
 .transaction-meta,
 .transaction-notes,
 .stack-item-subtitle {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+
   margin: 5px 0 0;
+
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.45;
+
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .transaction-right,
 .bill-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 7px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
 }
 
 .transaction-amount {
   font-size: 14px;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .income-text {
@@ -832,6 +860,7 @@ input[type="number"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
 }
 
 .edit-btn {
@@ -1119,11 +1148,6 @@ input[type="number"] {
   .side-column {
     position: static;
   }
-
-  #list {
-    max-height: none;
-    overflow: visible;
-  }
 }
 
 @media (max-width: 780px) {
@@ -1211,18 +1235,6 @@ input[type="number"] {
     grid-template-columns: 1fr;
   }
 
-  .transaction-item,
-  .stack-item {
-    grid-template-columns: 1fr;
-    align-items: start;
-  }
-
-  .transaction-right,
-  .bill-actions {
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-
   .chart-wrap {
     height: 210px;
   }
@@ -1253,48 +1265,4 @@ input[type="number"] {
   #balance {
     font-size: 42px;
   }
-}
-/* Fix desktop date text clipping in transactions + bills */
-@media (min-width: 781px) {
-  .transaction-item,
-  .stack-item {
-    grid-template-columns: minmax(0, 1fr) max-content;
-    align-items: start;
-  }
-
-  .transaction-meta,
-  .transaction-notes,
-  .stack-item-subtitle {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: normal;
-    line-height: 1.45;
-  }
-
-  .transaction-right,
-  .bill-actions {
-    min-width: fit-content;
-    flex-shrink: 0;
-  }
-
-  .transaction-amount,
-  .bill-status {
-    white-space: nowrap;
-  }
-
-  .combined-transactions-card,
-  .bills-card {
-    overflow: visible;
-  }
-
-  #list {
-    overflow-x: hidden;
-  }
-}
-
-/* Extra breathing room for the bills/transactions cards */
-.combined-transactions-card .stack-item,
-.combined-transactions-card .transaction-item,
-.bills-card .stack-item {
-  gap: 16px;
 }
