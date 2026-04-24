@@ -15,6 +15,7 @@ try {
 } catch (_) {}
 
 let transactions = [];
+let bills = [];
 let budgets = JSON.parse(localStorage.getItem("budgets")) || {};
 let activeRangeStart = "";
 let activeRangeEnd = "";
@@ -24,8 +25,10 @@ let monthlyTrendChart = null;
 let categoryExpenseChart = null;
 let currentLanguage = localStorage.getItem("language") || "en";
 let recurringProcessing = false;
+let transactionListExpanded = false;
 
 const LOCAL_TRANSACTIONS_KEY = "expense_tracker_cached_transactions_v2";
+const LOCAL_BILLS_KEY = "expense_tracker_cached_bills_v1";
 const CUSTOM_CATEGORIES_KEY = "expense_tracker_categories_v2";
 
 const DEFAULT_CATEGORIES = [
@@ -69,6 +72,24 @@ const translations = {
     notes: "Notes",
     addIncome: "Add Income",
     addExpense: "Add Expense",
+    billsReminders: "Bills & Reminders",
+    billName: "Bill Name",
+    dueDate: "Due Date",
+    reminderDays: "Remind Me",
+    reminderDaysHelp: "days before due date",
+    addBill: "Add Bill",
+    upcomingBills: "Upcoming Bills",
+    monthlyBillsTotal: "Monthly Bills",
+    dueSoon: "Due Soon",
+    overdue: "Overdue",
+    paidThisMonth: "Paid This Month",
+    markPaid: "Mark Paid",
+    noBillsFound: "No bills added yet.",
+    billSaved: "Bill saved.",
+    billDeleted: "Bill deleted.",
+    billPaid: "Bill marked paid and added as an expense.",
+    invalidBillName: "Please enter a bill name.",
+    invalidDueDate: "Please choose a due date.",
     searchFilters: "Search & Filters",
     search: "Search",
     type: "Type",
@@ -114,6 +135,8 @@ const translations = {
     noBudgetGoals: "No budget goals set yet.",
     noCategoryTotals: "No category totals yet.",
     noTransactionsFound: "No transactions found.",
+    showAllTransactions: "Show all transactions",
+    showLessTransactions: "Show less",
     transactionDeleted: "Transaction deleted.",
     transactionSaved: "Saved.",
     restored: "Transaction restored.",
@@ -164,7 +187,15 @@ const translations = {
     categoryExists: "That category already exists.",
     categoryAdded: "Category added.",
     categoryEmpty: "Enter a category name.",
-    categoryTooShort: "Category name is too short."
+    categoryTooShort: "Category name is too short.",
+    deleteCategory: "Delete Category",
+    deleteCategoryHelp: "Only custom categories that are not being used can be deleted.",
+    noCustomCategories: "No custom categories",
+    categoryDeleted: "Category deleted.",
+    categoryInUse: "This category is being used by transactions, bills, or budgets. Move or delete those items first.",
+    cannotDeleteCategory: "Default categories cannot be deleted.",
+    chooseCategoryDelete: "Choose a category to delete.",
+    confirmCategoryDelete: "Delete this category?"
   },
   es: {
     eyebrow: "Finanzas Personales",
@@ -191,6 +222,24 @@ const translations = {
     notes: "Notas",
     addIncome: "Agregar Ingreso",
     addExpense: "Agregar Gasto",
+    billsReminders: "Facturas y Recordatorios",
+    billName: "Nombre de Factura",
+    dueDate: "Fecha de Pago",
+    reminderDays: "Recordarme",
+    reminderDaysHelp: "días antes de vencer",
+    addBill: "Agregar Factura",
+    upcomingBills: "Facturas Próximas",
+    monthlyBillsTotal: "Facturas Mensuales",
+    dueSoon: "Próximas",
+    overdue: "Vencidas",
+    paidThisMonth: "Pagadas Este Mes",
+    markPaid: "Marcar Pagada",
+    noBillsFound: "Todavía no hay facturas.",
+    billSaved: "Factura guardada.",
+    billDeleted: "Factura eliminada.",
+    billPaid: "Factura marcada pagada y agregada como gasto.",
+    invalidBillName: "Por favor escribe el nombre de la factura.",
+    invalidDueDate: "Por favor elige una fecha de pago.",
     searchFilters: "Búsqueda y Filtros",
     search: "Buscar",
     type: "Tipo",
@@ -236,6 +285,8 @@ const translations = {
     noBudgetGoals: "Todavía no hay presupuestos guardados.",
     noCategoryTotals: "Todavía no hay totales por categoría.",
     noTransactionsFound: "No se encontraron movimientos.",
+    showAllTransactions: "Ver todos los movimientos",
+    showLessTransactions: "Ver menos",
     transactionDeleted: "Movimiento eliminado.",
     transactionSaved: "Guardado.",
     restored: "Movimiento restaurado.",
@@ -286,7 +337,15 @@ const translations = {
     categoryExists: "Esa categoría ya existe.",
     categoryAdded: "Categoría agregada.",
     categoryEmpty: "Escribe un nombre para la categoría.",
-    categoryTooShort: "El nombre de la categoría es muy corto."
+    categoryTooShort: "El nombre de la categoría es muy corto.",
+    deleteCategory: "Eliminar Categoría",
+    deleteCategoryHelp: "Solo puedes eliminar categorías personalizadas que no estén en uso.",
+    noCustomCategories: "No hay categorías personalizadas",
+    categoryDeleted: "Categoría eliminada.",
+    categoryInUse: "Esta categoría se está usando en movimientos, facturas o presupuestos. Mueve o elimina esos datos primero.",
+    cannotDeleteCategory: "Las categorías predeterminadas no se pueden eliminar.",
+    chooseCategoryDelete: "Elige una categoría para eliminar.",
+    confirmCategoryDelete: "¿Eliminar esta categoría?"
   }
 };
 
@@ -362,8 +421,9 @@ function sortCategoriesForDisplay(categories) {
 }
 
 function populateCategorySelects() {
-  const categorySelectIds = ["category", "budgetCategory", "editCategory"];
+  const categorySelectIds = ["category", "budgetCategory", "editCategory", "billCategory"];
   const filterSelect = document.getElementById("filterCategory");
+  const deleteCategorySelect = document.getElementById("deleteCategorySelect");
   const sortedCategories = sortCategoriesForDisplay(customCategories);
 
   categorySelectIds.forEach((id) => {
@@ -409,6 +469,76 @@ function populateCategorySelects() {
       filterSelect.value = "All";
     }
   }
+
+  if (deleteCategorySelect) {
+    const currentValue = deleteCategorySelect.value;
+    deleteCategorySelect.innerHTML = "";
+
+    const removableCategories = sortedCategories.filter((category) => !isBuiltInCategory(category));
+    if (removableCategories.length === 0) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = t("noCustomCategories");
+      deleteCategorySelect.appendChild(option);
+      deleteCategorySelect.disabled = true;
+    } else {
+      deleteCategorySelect.disabled = false;
+      removableCategories.forEach((category) => {
+        const option = document.createElement("option");
+        option.value = category;
+        option.textContent = translateCategory(category);
+        deleteCategorySelect.appendChild(option);
+      });
+      if (currentValue && removableCategories.includes(currentValue)) {
+        deleteCategorySelect.value = currentValue;
+      }
+    }
+  }
+}
+
+
+function deleteCustomCategory() {
+  const select = document.getElementById("deleteCategorySelect");
+  const category = normalizeOtherLabel(select?.value || "");
+
+  if (!category) {
+    alert(t("chooseCategoryDelete"));
+    return;
+  }
+
+  if (isBuiltInCategory(category)) {
+    alert(t("cannotDeleteCategory"));
+    return;
+  }
+
+  const categoryInTransactions = transactions.some(
+    (item) => normalizeOtherLabel(item.category).toLowerCase() === category.toLowerCase()
+  );
+
+  const categoryInBills = bills.some(
+    (item) => normalizeOtherLabel(item.category).toLowerCase() === category.toLowerCase()
+  );
+
+  const categoryInBudgets = Object.keys(budgets).some(
+    (key) => normalizeOtherLabel(key).toLowerCase() === category.toLowerCase()
+  );
+
+  if (categoryInTransactions || categoryInBills || categoryInBudgets) {
+    alert(t("categoryInUse"));
+    return;
+  }
+
+  const confirmed = confirm(`Are you sure you want to delete the category "${category}"?`);
+  if (!confirmed) return;
+
+  customCategories = customCategories.filter(
+    (item) => normalizeOtherLabel(item).toLowerCase() !== category.toLowerCase()
+  );
+
+  saveCategories();
+  populateCategorySelects();
+  showToast(t("categoryDeleted"));
+  updateUI();
 }
 
 function addCustomCategory() {
@@ -517,6 +647,9 @@ function setPlaceholders() {
   const searchInput = document.getElementById("searchInput");
   const budgetAmount = document.getElementById("budgetAmount");
   const newCategoryInput = document.getElementById("newCategoryInput");
+  const billName = document.getElementById("billName");
+  const billAmount = document.getElementById("billAmount");
+  const billNotes = document.getElementById("billNotes");
 
   if (desc) desc.placeholder = currentLanguage === "en" ? "Paycheck, Groceries, Gas..." : "Cheque, Compra, Gasolina...";
   if (amount) amount.placeholder = "0.00";
@@ -527,6 +660,12 @@ function setPlaceholders() {
       : "Buscar descripción, notas, categoría...";
   if (budgetAmount) budgetAmount.placeholder = "0.00";
   if (newCategoryInput) newCategoryInput.placeholder = "";
+  if (billName) billName.placeholder = currentLanguage === "en" ? "Rent, Phone, Car insurance..." : "Renta, Teléfono, Seguro...";
+  if (billAmount) billAmount.placeholder = "0.00";
+  if (billNotes) billNotes.placeholder = currentLanguage === "en" ? "Optional reminder notes..." : "Notas opcionales...";
+  if (billName) billName.placeholder = currentLanguage === "en" ? "Rent, Phone, Car insurance..." : "Renta, Teléfono, Seguro...";
+  if (billAmount) billAmount.placeholder = "0.00";
+  if (billNotes) billNotes.placeholder = currentLanguage === "en" ? "Optional reminder notes..." : "Notas opcionales...";
 }
 
 function translateStaticText() {
@@ -1636,6 +1775,224 @@ function createTransactionItem(transaction) {
   return li;
 }
 
+
+function normalizeBill(docId, data) {
+  const now = Date.now();
+  return {
+    id: docId,
+    name: String(data.name || "").trim(),
+    amount: Number(data.amount || 0),
+    category: normalizeOtherLabel(data.category || "Bills"),
+    dueDate: Number(data.dueDate || now),
+    frequency: data.frequency || "monthly",
+    reminderDays: Number(data.reminderDays ?? 3),
+    notes: data.notes || "",
+    paidDates: Array.isArray(data.paidDates) ? data.paidDates : [],
+    createdAt: Number(data.createdAt || now),
+    updatedAt: Number(data.updatedAt || now)
+  };
+}
+
+function cacheBillsLocally() {
+  localStorage.setItem(LOCAL_BILLS_KEY, JSON.stringify(bills));
+}
+
+function loadCachedBills() {
+  try {
+    const raw = localStorage.getItem(LOCAL_BILLS_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    bills = parsed.map((item) => normalizeBill(item.id || `local-bill-${Math.random()}`, item));
+    renderBills();
+  } catch (_) {}
+}
+
+function loadBills() {
+  db.collection("bills").onSnapshot(
+    (snapshot) => {
+      bills = [];
+      snapshot.forEach((doc) => bills.push(normalizeBill(doc.id, doc.data())));
+      cacheBillsLocally();
+      renderBills();
+      updateUI();
+    },
+    (error) => {
+      console.error("Error loading bills:", error);
+      renderBills();
+    }
+  );
+}
+
+function getBillInputData() {
+  const name = document.getElementById("billName")?.value.trim() || "";
+  const amountValue = document.getElementById("billAmount")?.value || "";
+  const category = normalizeOtherLabel(document.getElementById("billCategory")?.value || "Bills");
+  const dueDateValue = document.getElementById("billDueDate")?.value || "";
+  const frequency = document.getElementById("billFrequency")?.value || "monthly";
+  const reminderDays = Number(document.getElementById("billReminderDays")?.value || 3);
+  const notes = document.getElementById("billNotes")?.value.trim() || "";
+
+  if (!name) {
+    alert(t("invalidBillName"));
+    return null;
+  }
+  if (amountValue === "" || Number.isNaN(Number(amountValue)) || Number(amountValue) < 0) {
+    alert(t("invalidAmount"));
+    return null;
+  }
+  if (!dueDateValue) {
+    alert(t("invalidDueDate"));
+    return null;
+  }
+
+  return {
+    name,
+    amount: Number(amountValue),
+    category,
+    dueDate: getStartOfDay(dueDateValue),
+    frequency,
+    reminderDays: Math.max(0, reminderDays),
+    notes
+  };
+}
+
+function clearBillInputs() {
+  const sorted = sortCategoriesForDisplay(customCategories);
+  const billName = document.getElementById("billName");
+  const billAmount = document.getElementById("billAmount");
+  const billCategory = document.getElementById("billCategory");
+  const billDueDate = document.getElementById("billDueDate");
+  const billFrequency = document.getElementById("billFrequency");
+  const billReminderDays = document.getElementById("billReminderDays");
+  const billNotes = document.getElementById("billNotes");
+  if (billName) billName.value = "";
+  if (billAmount) billAmount.value = "";
+  if (billCategory) billCategory.value = sorted.includes("Bills") ? "Bills" : (sorted[0] || "Bills");
+  if (billDueDate) billDueDate.value = getTodayInputValue();
+  if (billFrequency) billFrequency.value = "monthly";
+  if (billReminderDays) billReminderDays.value = "3";
+  if (billNotes) billNotes.value = "";
+}
+
+function addBill() {
+  const data = getBillInputData();
+  if (!data) return;
+  const now = Date.now();
+  db.collection("bills").add({ ...data, paidDates: [], createdAt: now, updatedAt: now })
+    .then(() => { clearBillInputs(); showToast(t("billSaved")); })
+    .catch((error) => { console.error("Error adding bill:", error); alert(t("addError")); });
+}
+
+function deleteBill(id) {
+  if (!confirm(t("confirmDelete"))) return;
+  db.collection("bills").doc(id).delete()
+    .then(() => showToast(t("billDeleted")))
+    .catch((error) => { console.error("Error deleting bill:", error); alert(t("deleteError")); });
+}
+
+function getNextBillDueDate(bill) {
+  if (bill.frequency === "weekly") return addDays(bill.dueDate, 7);
+  return addMonths(bill.dueDate, 1);
+}
+
+function isBillPaidThisMonth(bill) {
+  const currentMonth = getCurrentMonthValue();
+  return (bill.paidDates || []).some((date) => {
+    const paid = new Date(Number(date));
+    const monthValue = `${paid.getFullYear()}-${String(paid.getMonth() + 1).padStart(2, "0")}`;
+    return monthValue === currentMonth;
+  });
+}
+
+function markBillPaid(id) {
+  const bill = bills.find((item) => item.id === id);
+  if (!bill) return;
+  const now = Date.now();
+  const paidDate = getStartOfDay(getTodayInputValue());
+
+  db.collection("transactions").add({
+    type: "Expense",
+    desc: bill.name,
+    amount: Number(bill.amount),
+    category: bill.category || "Bills",
+    notes: bill.notes ? `${bill.notes} • ${t("billPaid")}` : t("billPaid"),
+    recurring: false,
+    recurringInterval: "monthly",
+    recurringGenerated: false,
+    timestamp: paidDate,
+    createdAt: now,
+    updatedAt: now
+  }).then(() => {
+    return db.collection("bills").doc(id).update({
+      dueDate: getNextBillDueDate(bill),
+      paidDates: firebase.firestore.FieldValue.arrayUnion(paidDate),
+      updatedAt: now
+    });
+  }).then(() => {
+    showToast(t("billPaid"));
+  }).catch((error) => {
+    console.error("Error marking bill paid:", error);
+    alert(t("updateError"));
+  });
+}
+
+function getBillStatus(bill) {
+  const today = getStartOfDay(getTodayInputValue());
+  const due = Number(bill.dueDate);
+  const daysUntil = Math.ceil((due - today) / 86400000);
+  if (daysUntil < 0) return { key: "overdue", label: t("overdue"), className: "danger", daysUntil };
+  if (daysUntil <= Number(bill.reminderDays || 0)) return { key: "dueSoon", label: t("dueSoon"), className: "warning", daysUntil };
+  return { key: "upcomingBills", label: t("upcomingBills"), className: "neutral", daysUntil };
+}
+
+function renderBills() {
+  const list = document.getElementById("billsList");
+  if (!list) return;
+
+  const sortedBills = [...bills].sort((a, b) => Number(a.dueDate) - Number(b.dueDate));
+  const monthlyTotal = sortedBills.reduce((sum, bill) => sum + Number(bill.amount || 0), 0);
+  const today = getStartOfDay(getTodayInputValue());
+  const overdueCount = sortedBills.filter((bill) => Number(bill.dueDate) < today).length;
+  const dueSoonCount = sortedBills.filter((bill) => getBillStatus(bill).key === "dueSoon").length;
+  const paidCount = sortedBills.filter(isBillPaidThisMonth).length;
+
+  const totalEl = document.getElementById("monthlyBillsTotalValue");
+  const dueSoonEl = document.getElementById("dueSoonBillsValue");
+  const overdueEl = document.getElementById("overdueBillsValue");
+  const paidEl = document.getElementById("paidBillsValue");
+  if (totalEl) totalEl.textContent = `$${formatMoney(monthlyTotal)}`;
+  if (dueSoonEl) dueSoonEl.textContent = dueSoonCount;
+  if (overdueEl) overdueEl.textContent = overdueCount;
+  if (paidEl) paidEl.textContent = paidCount;
+
+  list.innerHTML = "";
+  if (sortedBills.length === 0) {
+    list.innerHTML = `<div class="empty-state">${t("noBillsFound")}</div>`;
+    return;
+  }
+
+  sortedBills.forEach((bill) => {
+    const status = getBillStatus(bill);
+    const dayText = status.daysUntil < 0 ? `${Math.abs(status.daysUntil)}d late` : `${status.daysUntil}d`;
+    const item = document.createElement("div");
+    item.className = "stack-item bill-item";
+    item.innerHTML = `
+      <div class="stack-item-main">
+        <span class="stack-item-title">${bill.name}</span>
+        <span class="stack-item-subtitle">$${formatMoney(bill.amount)} • ${translateCategory(bill.category)} • ${formatDate(bill.dueDate)}</span>
+        ${bill.notes ? `<span class="stack-item-subtitle">${bill.notes}</span>` : ""}
+      </div>
+      <div class="bill-actions">
+        <span class="bill-status ${status.className}">${dayText}</span>
+        <button class="bill-icon-btn paid" type="button" onclick="markBillPaid('${bill.id}')" title="${t("markPaid")}" aria-label="${t("markPaid")}">✓</button>
+        <button class="bill-icon-btn delete" type="button" onclick="deleteBill('${bill.id}')" title="${t("remove")}" aria-label="${t("remove")}">🗑</button>
+      </div>
+    `;
+    list.appendChild(item);
+  });
+}
+
 async function processRecurringTransactions() {
   if (recurringProcessing || !navigator.onLine) return;
   recurringProcessing = true;
@@ -1731,40 +2088,165 @@ function updateUI() {
   if (expensesEl) expensesEl.textContent = formatMoney(expenses);
 
   const filteredTransactions = getFilteredTransactions();
+  const toggleTransactionsBtn = document.getElementById("toggleTransactionsBtn");
+  const visibleTransactions = transactionListExpanded
+    ? filteredTransactions
+    : filteredTransactions.slice(0, 4);
 
   if (filteredTransactions.length === 0) {
     list.innerHTML = `<li class="empty-state">${t("noTransactionsFound")}</li>`;
+    if (toggleTransactionsBtn) toggleTransactionsBtn.classList.add("hidden");
   } else {
-    const grouped = groupTransactionsByDay(filteredTransactions);
+    const grouped = groupTransactionsByDay(visibleTransactions);
     grouped.forEach((group) => {
       list.appendChild(createDayHeader(group.label));
       group.items.forEach((transaction) => {
         list.appendChild(createTransactionItem(transaction));
       });
     });
+
+    if (toggleTransactionsBtn) {
+      if (filteredTransactions.length > 4) {
+        toggleTransactionsBtn.classList.remove("hidden");
+        toggleTransactionsBtn.textContent = transactionListExpanded
+          ? t("showLessTransactions")
+          : `${t("showAllTransactions")} (${filteredTransactions.length - 4} more)`;
+      } else {
+        toggleTransactionsBtn.classList.add("hidden");
+      }
+    }
   }
 
   updateRangeSummary();
   updateMonthlySummary();
   renderBudgetList();
+  renderBills();
   renderCategoryTotals();
   updateInsights();
   renderMonthlyTrendChart();
   renderCategoryExpenseChart();
 }
 
+function toggleTheme() {
+  const body = document.body;
+  const nextTheme = body.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  body.setAttribute("data-theme", nextTheme);
+  localStorage.setItem("theme", nextTheme);
+  updateUI();
+}
+
+function toggleLanguage() {
+  currentLanguage = currentLanguage === "en" ? "es" : "en";
+  localStorage.setItem("language", currentLanguage);
+  updateUI();
+}
+
+function openSideMenu() {
+  const sideMenu = document.getElementById("sideMenu");
+  const menuOverlay = document.getElementById("menuOverlay");
+  const menuBtn = document.getElementById("menuBtn");
+
+  if (!sideMenu || !menuOverlay) return;
+
+  sideMenu.classList.add("open");
+  menuOverlay.classList.add("open");
+  document.body.classList.add("menu-is-open");
+
+  sideMenu.setAttribute("aria-hidden", "false");
+  menuOverlay.setAttribute("aria-hidden", "false");
+  menuBtn?.setAttribute("aria-expanded", "true");
+}
+
+function closeSideMenu() {
+  const sideMenu = document.getElementById("sideMenu");
+  const menuOverlay = document.getElementById("menuOverlay");
+  const menuBtn = document.getElementById("menuBtn");
+
+  if (!sideMenu || !menuOverlay) return;
+
+  sideMenu.classList.remove("open");
+  menuOverlay.classList.remove("open");
+  document.body.classList.remove("menu-is-open");
+
+  sideMenu.setAttribute("aria-hidden", "true");
+  menuOverlay.setAttribute("aria-hidden", "true");
+  menuBtn?.setAttribute("aria-expanded", "false");
+}
+
+function scrollToAppSection(sectionId) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+
+  closeSideMenu();
+
+  setTimeout(() => {
+    section.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }, 220);
+}
+
+function setupSideMenu() {
+  const menuBtn = document.getElementById("menuBtn");
+  const closeMenuBtn = document.getElementById("closeMenuBtn");
+  const menuOverlay = document.getElementById("menuOverlay");
+  const sideMenu = document.getElementById("sideMenu");
+
+  menuBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openSideMenu();
+  });
+
+  closeMenuBtn?.addEventListener("click", closeSideMenu);
+  menuOverlay?.addEventListener("click", closeSideMenu);
+
+  sideMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+
+    const button = event.target.closest("button");
+    if (!button) return;
+
+    const target = button.getAttribute("data-scroll-target");
+    const action = button.getAttribute("data-menu-action");
+
+    if (target) {
+      scrollToAppSection(target);
+      return;
+    }
+
+    if (action === "theme") {
+      toggleTheme();
+      closeSideMenu();
+      return;
+    }
+
+    if (action === "language") {
+      toggleLanguage();
+      closeSideMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeSideMenu();
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   customCategories = customCategories.map(normalizeOtherLabel);
   customCategories = sortCategoriesForDisplay(customCategories);
-  saveCategories();
+  saveCategories(); setupSideMenu();
 
   const transactionDate = document.getElementById("transactionDate");
   const monthPicker = document.getElementById("monthPicker");
   if (transactionDate) transactionDate.value = getTodayInputValue();
   if (monthPicker) monthPicker.value = getCurrentMonthValue();
+  const billDueDate = document.getElementById("billDueDate");
+  if (billDueDate) billDueDate.value = getTodayInputValue();
 
   populateCategorySelects();
   loadCachedTransactions();
+  loadCachedBills();
   registerServiceWorker();
 
   document.getElementById("monthPicker")?.addEventListener("change", () => {
@@ -1779,10 +2261,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("sortOption")?.addEventListener("change", updateUI);
   document.getElementById("clearFiltersBtn")?.addEventListener("click", clearFilters);
   document.getElementById("exportCsvBtn")?.addEventListener("click", exportCsv);
+  document.getElementById("toggleTransactionsBtn")?.addEventListener("click", () => {
+    transactionListExpanded = !transactionListExpanded;
+    updateUI();
+  });
   document.getElementById("saveBudgetBtn")?.addEventListener("click", saveBudget);
+  document.getElementById("addBillBtn")?.addEventListener("click", addBill);
   document.getElementById("undoDeleteBtn")?.addEventListener("click", undoDelete);
 
   document.getElementById("addCategoryBtn")?.addEventListener("click", addCustomCategory);
+  document.getElementById("deleteCategoryBtn")?.addEventListener("click", deleteCustomCategory);
   document.getElementById("newCategoryInput")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -1795,18 +2283,28 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("editModalBackdrop")?.addEventListener("click", closeEditModal);
   document.getElementById("saveEditBtn")?.addEventListener("click", saveEditTransaction);
 
-  document.getElementById("themeToggleBtn")?.addEventListener("click", () => {
-    const body = document.body;
-    const nextTheme = body.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    body.setAttribute("data-theme", nextTheme);
-    localStorage.setItem("theme", nextTheme);
-    updateUI();
+  document.getElementById("themeToggleBtn")?.addEventListener("click", toggleTheme);
+  document.getElementById("languageToggleBtn")?.addEventListener("click", toggleLanguage);
+
+  document.getElementById("menuBtn")?.addEventListener("click", openSideMenu);
+  document.getElementById("closeMenuBtn")?.addEventListener("click", closeSideMenu);
+  document.getElementById("menuOverlay")?.addEventListener("click", closeSideMenu);
+
+  document.querySelectorAll("[data-scroll-target]").forEach((button) => {
+    button.addEventListener("click", () => scrollToAppSection(button.dataset.scrollTarget));
   });
 
-  document.getElementById("languageToggleBtn")?.addEventListener("click", () => {
-    currentLanguage = currentLanguage === "en" ? "es" : "en";
-    localStorage.setItem("language", currentLanguage);
-    updateUI();
+  document.querySelectorAll("[data-menu-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.menuAction;
+      if (action === "theme") toggleTheme();
+      if (action === "language") toggleLanguage();
+      closeSideMenu();
+    });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeSideMenu();
   });
 
   window.addEventListener("online", () => {
@@ -1827,4 +2325,5 @@ document.addEventListener("DOMContentLoaded", () => {
   translateStaticText();
   populateCategorySelects();
   loadTransactions();
+  loadBills();
 });
