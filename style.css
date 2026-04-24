@@ -1254,3 +1254,47 @@ input[type="number"] {
     font-size: 42px;
   }
 }
+/* Fix desktop date text clipping in transactions + bills */
+@media (min-width: 781px) {
+  .transaction-item,
+  .stack-item {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    align-items: start;
+  }
+
+  .transaction-meta,
+  .transaction-notes,
+  .stack-item-subtitle {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    line-height: 1.45;
+  }
+
+  .transaction-right,
+  .bill-actions {
+    min-width: fit-content;
+    flex-shrink: 0;
+  }
+
+  .transaction-amount,
+  .bill-status {
+    white-space: nowrap;
+  }
+
+  .combined-transactions-card,
+  .bills-card {
+    overflow: visible;
+  }
+
+  #list {
+    overflow-x: hidden;
+  }
+}
+
+/* Extra breathing room for the bills/transactions cards */
+.combined-transactions-card .stack-item,
+.combined-transactions-card .transaction-item,
+.bills-card .stack-item {
+  gap: 16px;
+}
