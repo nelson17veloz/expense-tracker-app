@@ -3416,4 +3416,4 @@ document.addEventListener("DOMContentLoaded", () => {
     showSignInOverlay();
     showToast(t("signInError"));
   }
-});
+});
