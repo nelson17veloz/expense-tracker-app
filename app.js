@@ -27,6 +27,22 @@ let currentLanguage = localStorage.getItem("language") || "en";
 let recurringProcessing = false;
 let transactionListExpanded = false;
 
+// UI: state for the UI improvements (period toggle, currency, bill calendar,
+// transaction list date filter, swipe). heroPeriod is a per-device preference.
+let heroPeriod = localStorage.getItem("expense_tracker_hero_period") || "month";
+let appCurrency = localStorage.getItem("expense_tracker_currency") || "USD";
+let listDateFilter = null;
+let billCalendarMonth = getCurrentMonthValue();
+let billCalendarSelectedDay = null;
+let swipeOpenItem = null;
+
+// AUTH: Google sign-in gate state. No Firestore listener attaches until a
+// Firebase user exists; authUid is the single UID allowlisted in the rules.
+let authUid = null;
+let authListenersStarted = false;
+let deviceIdExpanded = false;
+let lastSyncWriteErrorAt = 0;
+
 const LOCAL_TRANSACTIONS_KEY = "expense_tracker_cached_transactions_v2";
 const LOCAL_BILLS_KEY = "expense_tracker_cached_bills_v1";
 const CUSTOM_CATEGORIES_KEY = "expense_tracker_categories_v2";
@@ -195,7 +211,41 @@ const translations = {
     categoryInUse: "This category is being used by transactions, bills, or budgets. Move or delete those items first.",
     cannotDeleteCategory: "Default categories cannot be deleted.",
     chooseCategoryDelete: "Choose a category to delete.",
-    confirmCategoryDelete: "Delete this category?"
+    confirmCategoryDelete: "Delete this category?",
+    // UI: strings for the UI improvements
+    billCalClear: "Clear",
+    noBillsThisDay: "No bills due this day.",
+    swipeEdit: "Edit",
+    swipeDelete: "Delete",
+    emptyTransactionsTitle: "No transactions yet",
+    emptyTransactionsHint: "Add your first transaction to start tracking your money.",
+    addFirstTransaction: "Add your first transaction",
+    emptyBillsTitle: "No bills yet",
+    emptyBillsHint: "Add your first bill so you never miss a due date.",
+    addFirstBill: "Add your first bill",
+    emptyBudgetsHint: "Use the form above to set your first budget.",
+    periodMonth: "Month",
+    periodWeek: "Week",
+    weekOf: "Week of",
+    currency: "Currency",
+    upToDate: "Everything is up to date",
+    tapToRefresh: "Tap to refresh",
+    highestIncomeDay: "Highest Income Day",
+    highestExpenseDay: "Highest Expense Day",
+    viewDayTransactions: "View transactions for this day",
+    signInSubtext: "Sign in to sync your data across devices.",
+    signInWithGoogle: "Sign in with Google",
+    signInError: "Sign-in failed. Please try again.",
+    enableGoogleProvider: "Enable Google sign-in in Firebase Console \u2192 Authentication \u2192 Sign-in method, then try again.",
+    unauthorizedDomain: "This site\u2019s domain isn\u2019t authorized for sign-in. Add it in Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
+    deviceId: "Device ID",
+    deviceIdHint: "This is the ID to paste into your Firestore security rules.",
+    tapToShowFull: "Tap to view the full ID and copy it",
+    deviceIdCopied: "Device ID copied",
+    signOut: "Sign out",
+    signedOut: "Signed out",
+    notSignedIn: "Not signed in",
+    syncWriteError: "Couldn't save to the cloud \u2014 check your connection",
   },
   es: {
     eyebrow: "Finanzas Personales",
@@ -345,7 +395,41 @@ const translations = {
     categoryInUse: "Esta categoría se está usando en movimientos, facturas o presupuestos. Mueve o elimina esos datos primero.",
     cannotDeleteCategory: "Las categorías predeterminadas no se pueden eliminar.",
     chooseCategoryDelete: "Elige una categoría para eliminar.",
-    confirmCategoryDelete: "¿Eliminar esta categoría?"
+    confirmCategoryDelete: "¿Eliminar esta categoría?",
+    // UI: strings for the UI improvements
+    billCalClear: "Limpiar",
+    noBillsThisDay: "No hay facturas para este día.",
+    swipeEdit: "Editar",
+    swipeDelete: "Eliminar",
+    emptyTransactionsTitle: "Aún no hay movimientos",
+    emptyTransactionsHint: "Agrega tu primer movimiento para empezar a llevar tus cuentas.",
+    addFirstTransaction: "Agregar mi primer movimiento",
+    emptyBillsTitle: "Aún no hay facturas",
+    emptyBillsHint: "Agrega tu primera factura para no olvidar ningún pago.",
+    addFirstBill: "Agregar mi primera factura",
+    emptyBudgetsHint: "Usa el formulario de arriba para crear tu primer presupuesto.",
+    periodMonth: "Mes",
+    periodWeek: "Semana",
+    weekOf: "Semana del",
+    currency: "Moneda",
+    upToDate: "Todo está actualizado",
+    tapToRefresh: "Toca para actualizar",
+    highestIncomeDay: "Día con Mayor Ingreso",
+    highestExpenseDay: "Día con Mayor Gasto",
+    viewDayTransactions: "Ver los movimientos de este día",
+    signInSubtext: "Inicia sesión para sincronizar tus datos en todos tus dispositivos.",
+    signInWithGoogle: "Iniciar sesión con Google",
+    signInError: "Error al iniciar sesión. Inténtalo de nuevo.",
+    enableGoogleProvider: "Activa el inicio de sesión con Google en Firebase Console \u2192 Authentication \u2192 Sign-in method e inténtalo de nuevo.",
+    unauthorizedDomain: "El dominio de este sitio no est\u00e1 autorizado para iniciar sesi\u00f3n. Agr\u00e9galo en Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
+    deviceId: "ID del dispositivo",
+    deviceIdHint: "Este es el ID que debes pegar en tus reglas de seguridad de Firestore.",
+    tapToShowFull: "Toca para ver el ID completo y copiarlo",
+    deviceIdCopied: "ID del dispositivo copiado",
+    signOut: "Cerrar sesión",
+    signedOut: "Sesión cerrada",
+    notSignedIn: "Sin sesión iniciada",
+    syncWriteError: "No se pudo guardar en la nube \u2014 revisa tu conexión",
   }
 };
 
@@ -403,6 +487,80 @@ function loadCategories() {
 
 function saveCategories() {
   localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(customCategories));
+}
+
+// ---------------------------------------------------------------------------
+// SYNC FIX (A + B): cross-device settings sync.
+//
+// Budgets and custom categories used to live only in localStorage, so every
+// device had its own copy. They are now mirrored to Firestore under a shared
+// "appmeta" collection. localStorage remains as the offline cache / boot
+// fallback; Firestore is the source of truth once its snapshot arrives.
+//
+// Rules to avoid echo loops:
+//  - Snapshot callbacks below NEVER write to Firestore (read-only).
+//  - Firestore writes happen only on explicit user actions (or when the
+//    transaction listener auto-adds a genuinely new category).
+// ---------------------------------------------------------------------------
+const appmetaRef = db.collection("appmeta");
+const budgetsDocRef = appmetaRef.doc("budgets");
+const categoriesDocRef = appmetaRef.doc("categories");
+const settingsDocRef = appmetaRef.doc("settings"); // UI: currency sync doc
+
+function persistBudgets() {
+  // SYNC FIX: write budgets to the localStorage cache AND Firestore.
+  localStorage.setItem("budgets", JSON.stringify(budgets));
+  budgetsDocRef.set({ values: budgets }, { merge: true }).catch((error) => reportSyncWriteError(error, "budgets"));
+}
+
+function loadBudgets() {
+  // SYNC FIX: keep budgets in sync across devices via a realtime listener.
+  budgetsDocRef.onSnapshot(
+    (doc) => {
+      const data = doc.exists ? doc.data() : null;
+      if (data && data.values && typeof data.values === "object") {
+        budgets = data.values;
+        localStorage.setItem("budgets", JSON.stringify(budgets));
+        renderBudgetList();
+        updateInsights();
+      }
+    },
+    (error) => {
+      console.error("Error loading budgets:", error);
+    }
+  );
+}
+
+function persistCategories() {
+  // SYNC FIX: write categories to the localStorage cache AND Firestore.
+  saveCategories();
+  categoriesDocRef.set({ list: customCategories }, { merge: true }).catch((error) => reportSyncWriteError(error, "categories"));
+}
+
+function loadCategoriesSync() {
+  // SYNC FIX: keep custom categories in sync across devices via a realtime
+  // listener. Never writes back from here, so no echo loop is possible.
+  categoriesDocRef.onSnapshot(
+    (doc) => {
+      const data = doc.exists ? doc.data() : null;
+      if (data && Array.isArray(data.list)) {
+        const merged = [...DEFAULT_CATEGORIES];
+        data.list.forEach((item) => {
+          const cleaned = normalizeOtherLabel(item);
+          if (!cleaned) return;
+          const exists = merged.some((existing) => existing.toLowerCase() === cleaned.toLowerCase());
+          if (!exists) merged.push(cleaned);
+        });
+        customCategories = merged;
+        saveCategories();
+        populateCategorySelects();
+        updateUI();
+      }
+    },
+    (error) => {
+      console.error("Error loading categories:", error);
+    }
+  );
 }
 
 function sortCategoriesForDisplay(categories) {
@@ -535,7 +693,7 @@ function deleteCustomCategory() {
     (item) => normalizeOtherLabel(item).toLowerCase() !== category.toLowerCase()
   );
 
-  saveCategories();
+  persistCategories(); // SYNC FIX: sync the deletion to Firestore too
   populateCategorySelects();
   showToast(t("categoryDeleted"));
   updateUI();
@@ -575,7 +733,7 @@ function addCustomCategory() {
   }
 
   customCategories.push(normalized);
-  saveCategories();
+  persistCategories(); // SYNC FIX: sync the new category to Firestore too
   populateCategorySelects();
 
   const categorySelect = document.getElementById("category");
@@ -593,6 +751,9 @@ function setSyncBadge(mode) {
   if (!syncBadge) return;
 
   syncBadge.className = "status-badge neutral";
+  syncBadge.title = t("tapToRefresh"); // UI: the badge is tappable to refresh
+  // AUTH: include this device's UID in the tooltip so it can be copied into rules.
+  if (authUid) syncBadge.title += `\n${t("deviceId")}: ${authUid}`;
 
   if (mode === "syncing") {
     syncBadge.textContent = t("syncing");
@@ -614,6 +775,221 @@ function updateConnectionBadge() {
     badge.textContent = t("offline");
     badge.className = "status-badge offline";
   }
+}
+
+// ============================================================
+// AUTH: Google sign-in gate. Every Firestore listener and every
+// Firestore write below only runs after Firebase Auth reports a
+// signed-in user. The Google session persists across reloads via
+// Firebase's default persistence, so sign-in is a one-time step per
+// device and the same UID works everywhere.
+// ============================================================
+function ensureAuthenticated() {
+  // Handle the return leg of a redirect-based sign-in, if one happened.
+  firebase.auth().getRedirectResult().catch((error) => {
+    console.error("Redirect sign-in error:", error);
+    showToast(t("signInError"));
+  });
+  firebase.auth().onAuthStateChanged((user) => {
+    if (user) {
+      authUid = user.uid;
+      hideSignInOverlay();
+      updateDeviceIdUI();
+      startFirestoreListeners();
+    } else {
+      authUid = null;
+      updateDeviceIdUI();
+      showSignInOverlay();
+    }
+  });
+}
+
+function startFirestoreListeners() {
+  // AUTH: single gate — nothing here runs before a user exists.
+  if (authListenersStarted) return;
+  authListenersStarted = true;
+  loadTransactions();
+  loadBills();
+  loadBudgets();
+  loadCategoriesSync();
+  loadCurrencySync();
+}
+
+async function signInWithGoogle() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  try {
+    await firebase.auth().signInWithPopup(provider);
+    // Success is handled by the onAuthStateChanged listener.
+  } catch (error) {
+    if (error && (error.code === "auth/popup-blocked" || error.code === "auth/popup-closed-by-user")) {
+      // Popups blocked (common in embedded webviews): fall back to a
+      // full-page redirect; getRedirectResult() on the next boot completes it.
+      try {
+        await firebase.auth().signInWithRedirect(provider);
+      } catch (redirectError) {
+        handleSignInError(redirectError);
+      }
+    } else {
+      handleSignInError(error);
+    }
+  }
+}
+
+function handleSignInError(error) {
+  console.error("Google sign-in failed:", error);
+  if (error && error.code === "auth/operation-not-allowed") {
+    showToast(t("enableGoogleProvider"));
+  } else if (error && error.code === "auth/unauthorized-domain") {
+    showToast(t("unauthorizedDomain"));
+  } else {
+    showToast(t("signInError"));
+  }
+  setSyncBadge("cached");
+}
+
+function signOut() {
+  firebase.auth().signOut().then(() => {
+    showToast(t("signedOut"));
+    // onAuthStateChanged(null) brings the sign-in overlay back.
+  }).catch((error) => {
+    console.error("Sign-out failed:", error);
+    showToast(t("signInError"));
+  });
+}
+
+function showSignInOverlay() {
+  let overlay = document.getElementById("authOverlay");
+  if (overlay) {
+    overlay.classList.remove("hidden");
+    return;
+  }
+  overlay = document.createElement("div");
+  overlay.id = "authOverlay";
+  overlay.className = "auth-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  const card = document.createElement("div");
+  card.className = "auth-card";
+  const logo = document.createElement("div");
+  logo.className = "auth-logo";
+  logo.textContent = "\uD83D\uDCB0";
+  const title = document.createElement("h2");
+  title.className = "auth-title";
+  title.setAttribute("data-i18n", "appTitle");
+  title.textContent = t("appTitle");
+  const sub = document.createElement("p");
+  sub.className = "auth-sub";
+  sub.setAttribute("data-i18n", "signInSubtext");
+  sub.textContent = t("signInSubtext");
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "googleSignInBtn";
+  btn.className = "auth-google-btn";
+  const g = document.createElement("span");
+  g.className = "auth-google-g";
+  g.textContent = "G";
+  g.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.setAttribute("data-i18n", "signInWithGoogle");
+  label.textContent = t("signInWithGoogle");
+  btn.appendChild(g);
+  btn.appendChild(label);
+  btn.addEventListener("click", signInWithGoogle);
+  card.appendChild(logo);
+  card.appendChild(title);
+  card.appendChild(sub);
+  card.appendChild(btn);
+  overlay.appendChild(card);
+  document.body.prepend(overlay);
+}
+
+function hideSignInOverlay() {
+  document.getElementById("authOverlay")?.classList.add("hidden");
+}
+
+// AUTH: surface background sync-write failures (budgets / categories /
+// currency / recurring generation) with the existing toast instead of a
+// silent console.error. Rate-limited so a flaky connection doesn't spam.
+function reportSyncWriteError(error, context) {
+  console.error(`Error syncing ${context}:`, error);
+  const now = Date.now();
+  if (now - lastSyncWriteErrorAt < 30000) return;
+  lastSyncWriteErrorAt = now;
+  showToast(t("syncWriteError"));
+}
+
+function truncateUid(uid) {
+  if (!uid || uid.length <= 12) return uid || "";
+  return `${uid.slice(0, 6)}\u2026${uid.slice(-4)}`;
+}
+
+// AUTH: device-ID card at the bottom of the Insights tab. Shows the signed-in
+// Google UID (truncated); tapping reveals the full UID and copies it for the
+// rules page. Includes a sign-out button.
+function buildDeviceIdCard() {
+  const anchor = document.getElementById("categoryTotalsList")?.closest("section");
+  if (!anchor || document.getElementById("deviceIdCard")) return;
+  const card = document.createElement("section");
+  card.className = "card insights-card fade-in";
+  card.id = "deviceIdCard";
+  const header = document.createElement("div");
+  header.className = "section-header";
+  const title = document.createElement("h3");
+  title.setAttribute("data-i18n", "deviceId");
+  title.textContent = t("deviceId");
+  header.appendChild(title);
+  const row = document.createElement("div");
+  row.className = "device-id-row";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "deviceIdBtn";
+  btn.className = "device-id-btn";
+  const value = document.createElement("span");
+  value.id = "deviceIdValue";
+  value.textContent = "\u2026";
+  btn.appendChild(value);
+  btn.addEventListener("click", () => {
+    if (!authUid) return;
+    deviceIdExpanded = !deviceIdExpanded;
+    value.textContent = deviceIdExpanded ? authUid : truncateUid(authUid);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(authUid).then(
+        () => showToast(t("deviceIdCopied")),
+        () => showToast(authUid)
+      );
+    } else {
+      showToast(authUid);
+    }
+  });
+  const signOutBtn = document.createElement("button");
+  signOutBtn.type = "button";
+  signOutBtn.id = "signOutBtn";
+  signOutBtn.className = "device-id-signout";
+  signOutBtn.setAttribute("data-i18n", "signOut");
+  signOutBtn.textContent = t("signOut");
+  signOutBtn.addEventListener("click", signOut);
+  row.appendChild(btn);
+  row.appendChild(signOutBtn);
+  const hint = document.createElement("p");
+  hint.className = "device-id-hint";
+  hint.setAttribute("data-i18n", "deviceIdHint");
+  hint.textContent = t("deviceIdHint");
+  card.appendChild(header);
+  card.appendChild(row);
+  card.appendChild(hint);
+  anchor.after(card);
+}
+
+function updateDeviceIdUI() {
+  const value = document.getElementById("deviceIdValue");
+  if (value) value.textContent = authUid ? (deviceIdExpanded ? authUid : truncateUid(authUid)) : t("notSignedIn");
+  const btn = document.getElementById("deviceIdBtn");
+  if (btn) btn.title = t("tapToShowFull");
+  const signOutBtn = document.getElementById("signOutBtn");
+  if (signOutBtn) signOutBtn.style.display = authUid ? "" : "none";
+  // Keep the sync badge tooltip in sync (setSyncBadge also appends it).
+  const syncBadge = document.getElementById("syncBadge");
+  if (syncBadge && authUid) syncBadge.title = `${t("tapToRefresh")}\n${t("deviceId")}: ${authUid}`;
 }
 
 function showToast(message, showUndo = false) {
@@ -689,11 +1065,65 @@ function translateStaticText() {
 function formatMoney(value) {
   return Number(value || 0).toFixed(2);
 }
+// ---------------------------------------------------------------------------
+// UI: currency setting.
+//
+// Every amount rendered in the app goes through formatCurrency(), so picking
+// a currency updates the hero, lists, budgets, insights and chart tooltips
+// automatically. The CSV export keeps plain numbers via formatMoney() because
+// that is friendlier for spreadsheets. The choice syncs across devices through
+// the appmeta/settings doc (same pattern as budgets/categories): localStorage
+// is the offline cache, Firestore is the source of truth, and writes happen
+// only when the user changes the picker.
+// ---------------------------------------------------------------------------
+const SUPPORTED_CURRENCIES = ["USD", "EUR", "GBP", "MXN", "COP", "ARS", "CLP", "PEN", "CAD", "BRL", "JPY", "CHF"];
+const CURRENCY_KEY = "expense_tracker_currency";
+
+function formatCurrency(value) {
+  const numeric = Number(value || 0);
+  const code = SUPPORTED_CURRENCIES.includes(appCurrency) ? appCurrency : "USD";
+  try {
+    return new Intl.NumberFormat(currentLanguage === "es" ? "es-ES" : "en-US", {
+      style: "currency",
+      currency: code
+    }).format(numeric);
+  } catch (_) {
+    return `${code} ${formatMoney(numeric)}`;
+  }
+}
+
+function persistCurrency() {
+  localStorage.setItem(CURRENCY_KEY, appCurrency);
+  settingsDocRef.set({ currency: appCurrency }, { merge: true }).catch((error) => reportSyncWriteError(error, "currency"));
+}
+
+function loadCurrencySync() {
+  // Read-only snapshot callback — never writes back, so no echo loop.
+  settingsDocRef.onSnapshot(
+    (doc) => {
+      const data = doc.exists ? doc.data() : null;
+      if (data && typeof data.currency === "string" && SUPPORTED_CURRENCIES.includes(data.currency)) {
+        if (data.currency !== appCurrency) {
+          appCurrency = data.currency;
+          localStorage.setItem(CURRENCY_KEY, appCurrency);
+          syncCurrencySelect();
+          updateUI();
+        }
+      }
+    },
+    (error) => {
+      console.error("Error loading currency:", error);
+    }
+  );
+}
 
 function formatDate(timestamp) {
+  // SYNC FIX: day-timestamps are UTC midnights; format them in UTC so every
+  // device shows the same date regardless of its timezone.
   if (!timestamp) return "";
   return new Date(Number(timestamp)).toLocaleDateString(
-    currentLanguage === "es" ? "es-ES" : undefined
+    currentLanguage === "es" ? "es-ES" : undefined,
+    { timeZone: "UTC" }
   );
 }
 
@@ -706,87 +1136,109 @@ function formatTime(timestamp) {
 }
 
 function formatDateTime(timestamp) {
+  // Displays an exact instant (createdAt); keeps local date+time rendering so
+  // e.g. "added at 11:40 PM" reads exactly as before on every device.
   if (!timestamp) return "";
-  return `${formatDate(timestamp)} ${t("at")} ${formatTime(timestamp)}`;
+  const datePart = new Date(Number(timestamp)).toLocaleDateString(
+    currentLanguage === "es" ? "es-ES" : undefined
+  );
+  return `${datePart} ${t("at")} ${formatTime(timestamp)}`;
 }
 
 function formatDateForInput(timestamp) {
+  // SYNC FIX: read the UTC day back out of a UTC-midnight day-timestamp.
   const date = new Date(Number(timestamp));
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
 function formatMonthLabel(monthValue) {
+  // SYNC FIX: build the label date in UTC for cross-device consistency.
   if (!monthValue) return t("currentMonth");
   const [year, month] = monthValue.split("-");
-  return new Date(Number(year), Number(month) - 1, 1).toLocaleDateString(
+  return new Date(Date.UTC(Number(year), Number(month) - 1, 1)).toLocaleDateString(
     currentLanguage === "es" ? "es-ES" : undefined,
-    { month: "long", year: "numeric" }
+    { month: "long", year: "numeric", timeZone: "UTC" }
   );
 }
 
 function getCurrentMonthValue() {
+  // SYNC FIX: the "current month" key is UTC-based so it matches on devices
+  // in any timezone.
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function getTodayInputValue() {
+  // SYNC FIX: "today" is the UTC date so it is the same key on every device.
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
 }
 
 function getStartOfDay(dateString) {
-  return new Date(`${dateString}T00:00:00`).getTime();
+  // SYNC FIX: day boundaries are UTC midnights, so every device computes the
+  // identical timestamp for the same "YYYY-MM-DD" date.
+  if (!dateString) return NaN;
+  const parts = String(dateString).split("-");
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!year || !month || !day) return NaN;
+  return Date.UTC(year, month - 1, day);
 }
 
 function getEndOfDay(dateString) {
-  return new Date(`${dateString}T23:59:59.999`).getTime();
+  // SYNC FIX: last millisecond of the UTC day.
+  const start = getStartOfDay(dateString);
+  return Number.isNaN(start) ? NaN : start + 86400000 - 1;
 }
 
 function addDays(timestamp, days) {
+  // SYNC FIX: UTC date math keeps UTC-midnight timestamps exact across DST.
   const date = new Date(Number(timestamp));
-  date.setDate(date.getDate() + days);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.getTime();
 }
 
 function addMonths(timestamp, months) {
+  // SYNC FIX: UTC month math keeps UTC-midnight timestamps exact.
   const date = new Date(Number(timestamp));
-  const day = date.getDate();
-  date.setMonth(date.getMonth() + months);
-  if (date.getDate() < day) {
-    date.setDate(0);
+  const day = date.getUTCDate();
+  date.setUTCMonth(date.getUTCMonth() + months);
+  if (date.getUTCDate() < day) {
+    date.setUTCDate(0);
   }
   return date.getTime();
 }
 
 function getDayKey(timestamp) {
+  // SYNC FIX: the day key is the UTC calendar day of the timestamp.
   const date = new Date(Number(timestamp));
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
 function getDayLabel(timestamp) {
-  const date = new Date(Number(timestamp));
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-
-  const todayKey = getDayKey(today.getTime());
-  const yesterdayKey = getDayKey(yesterday.getTime());
+  // SYNC FIX: compare UTC day keys so "Today"/"Yesterday" agree on all devices.
+  const now = new Date();
+  const todayUtcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const todayKey = getDayKey(todayUtcMidnight);
+  const yesterdayKey = getDayKey(todayUtcMidnight - 86400000);
   const dateKey = getDayKey(timestamp);
 
   if (dateKey === todayKey) return t("today");
   if (dateKey === yesterdayKey) return t("yesterday");
 
-  return date.toLocaleDateString(currentLanguage === "es" ? "es-ES" : undefined, {
+  return new Date(Number(timestamp)).toLocaleDateString(currentLanguage === "es" ? "es-ES" : undefined, {
     weekday: "long",
     month: "long",
     day: "numeric",
-    year: "numeric"
+    year: "numeric",
+    timeZone: "UTC"
   });
 }
 
@@ -913,16 +1365,25 @@ async function loadTransactions() {
         transactions.push(normalizeTransaction(doc.id, doc.data()));
       });
 
+      let categoriesChanged = false;
       transactions.forEach((transaction) => {
         const category = normalizeOtherLabel(transaction.category);
         const exists = customCategories.some((item) => item.toLowerCase() === category.toLowerCase());
         if (category && !exists) {
           customCategories.push(category);
+          categoriesChanged = true;
         }
       });
 
       customCategories = sortCategoriesForDisplay(customCategories);
-      saveCategories();
+      // SYNC FIX: push genuinely new categories (learned from synced
+      // transactions) to Firestore as well; skip the write when nothing
+      // changed so snapshots stay quiet.
+      if (categoriesChanged) {
+        persistCategories();
+      } else {
+        saveCategories();
+      }
       cacheTransactionsLocally();
       populateCategorySelects();
 
@@ -1096,6 +1557,11 @@ function getFilteredTransactions() {
 
   let result = [...transactions];
 
+  // UI: drill-down from insights filters the list to a single day.
+  if (listDateFilter) {
+    result = result.filter((transaction) => getDayKey(transaction.timestamp) === listDateFilter);
+  }
+
   result = result.filter((transaction) => {
     const matchesSearch =
       !searchTerm ||
@@ -1156,9 +1622,10 @@ function getTransactionsInRange(startDate, endDate) {
 }
 
 function getTransactionsForMonth(monthValue) {
+  // SYNC FIX: month boundaries in UTC so every device selects the same set.
   const [year, month] = monthValue.split("-");
-  const start = new Date(Number(year), Number(month) - 1, 1).getTime();
-  const end = new Date(Number(year), Number(month), 0, 23, 59, 59, 999).getTime();
+  const start = Date.UTC(Number(year), Number(month) - 1, 1);
+  const end = Date.UTC(Number(year), Number(month), 0, 23, 59, 59, 999);
 
   return transactions.filter((transaction) => {
     const timestamp = Number(transaction.timestamp);
@@ -1206,18 +1673,18 @@ function applySummaryToElements(summary, ids) {
   const highestExpenseEl = document.getElementById(ids.highestExpense);
   const highestExpenseDateEl = document.getElementById(ids.highestExpenseDate);
 
-  if (incomeEl) incomeEl.textContent = formatMoney(summary.income);
-  if (expensesEl) expensesEl.textContent = formatMoney(summary.expenses);
+  if (incomeEl) incomeEl.textContent = formatCurrency(summary.income); // UI
+  if (expensesEl) expensesEl.textContent = formatCurrency(summary.expenses); // UI
 
   if (netEl) {
-    netEl.textContent = `$${formatMoney(summary.net)}`;
+    netEl.textContent = formatCurrency(summary.net); // UI
     netEl.classList.remove("net-positive", "net-negative");
     netEl.classList.add(summary.net >= 0 ? "net-positive" : "net-negative");
   }
 
   if (highestIncomeEl && highestIncomeDateEl) {
     if (summary.highestIncome) {
-      highestIncomeEl.textContent = `${summary.highestIncome.desc} — $${formatMoney(summary.highestIncome.amount)}`;
+      highestIncomeEl.textContent = `${summary.highestIncome.desc} — ${formatCurrency(summary.highestIncome.amount)}`; // UI
       highestIncomeDateEl.textContent = formatDateTime(summary.highestIncome.createdAt);
     } else {
       highestIncomeEl.textContent = "None";
@@ -1227,7 +1694,7 @@ function applySummaryToElements(summary, ids) {
 
   if (highestExpenseEl && highestExpenseDateEl) {
     if (summary.highestExpense) {
-      highestExpenseEl.textContent = `${summary.highestExpense.desc} — $${formatMoney(summary.highestExpense.amount)}`;
+      highestExpenseEl.textContent = `${summary.highestExpense.desc} — ${formatCurrency(summary.highestExpense.amount)}`; // UI
       highestExpenseDateEl.textContent = formatDateTime(summary.highestExpense.createdAt);
     } else {
       highestExpenseEl.textContent = "None";
@@ -1337,7 +1804,7 @@ function renderBudgetList() {
   const categories = Object.keys(budgets);
 
   if (categories.length === 0) {
-    budgetList.innerHTML = `<div class="empty-state">${t("noBudgetGoals")}</div>`;
+    budgetList.innerHTML = `<div class="empty-state">${t("noBudgetGoals")}<br><span class="empty-state-hint-inline">${t("emptyBudgetsHint")}</span></div>`; // UI
     return;
   }
 
@@ -1354,19 +1821,31 @@ function renderBudgetList() {
       const main = document.createElement("div");
       main.className = "stack-item-main";
 
+      // UI: budget health — green under 70% used, amber up to 100%, red over.
+      const usageRatio = budgetAmount > 0 ? spent / budgetAmount : (spent > 0 ? 1 : 0);
+      const health = usageRatio < 0.7 ? "good" : usageRatio < 1 ? "warn" : "over";
+
       const title = document.createElement("div");
       title.className = "stack-item-title";
-      title.textContent = `${translateCategory(category)} — $${formatMoney(budgetAmount)}`;
+      title.textContent = `${translateCategory(category)} — ${formatCurrency(budgetAmount)}`;
 
       const subtitle = document.createElement("div");
-      subtitle.className = "stack-item-subtitle";
+      subtitle.className = `stack-item-subtitle budget-${health}`;
       subtitle.textContent =
         remaining >= 0
-          ? `${t("spent")} $${formatMoney(spent)} • ${t("remaining")} $${formatMoney(remaining)}`
-          : `${t("spent")} $${formatMoney(spent)} • ${t("overBudgetBy")} $${formatMoney(Math.abs(remaining))}`;
+          ? `${t("spent")} ${formatCurrency(spent)} • ${t("remaining")} ${formatCurrency(remaining)}`
+          : `${t("spent")} ${formatCurrency(spent)} • ${t("overBudgetBy")} ${formatCurrency(Math.abs(remaining))}`;
+
+      const progress = document.createElement("div");
+      progress.className = "budget-progress";
+      const fill = document.createElement("div");
+      fill.className = `budget-fill ${health}`;
+      fill.style.width = `${Math.min(100, Math.max(0, usageRatio * 100))}%`;
+      progress.appendChild(fill);
 
       main.appendChild(title);
       main.appendChild(subtitle);
+      main.appendChild(progress);
 
       const removeBtn = document.createElement("button");
       removeBtn.className = "stack-item-btn";
@@ -1374,7 +1853,7 @@ function renderBudgetList() {
       removeBtn.textContent = t("remove");
       removeBtn.onclick = () => {
         delete budgets[category];
-        localStorage.setItem("budgets", JSON.stringify(budgets));
+        persistBudgets(); // SYNC FIX: sync the removal to Firestore too
         renderBudgetList();
         updateInsights();
       };
@@ -1425,7 +1904,7 @@ function renderCategoryTotals() {
 
     const subtitle = document.createElement("div");
     subtitle.className = "stack-item-subtitle";
-    subtitle.textContent = `${t("income")} $${formatMoney(totals[category].income)} • ${t("expense")} $${formatMoney(totals[category].expense)}`;
+    subtitle.textContent = `${t("income")} ${formatCurrency(totals[category].income)} • ${t("expense")} ${formatCurrency(totals[category].expense)}`; // UI
 
     main.appendChild(title);
     main.appendChild(subtitle);
@@ -1439,8 +1918,9 @@ function updateInsights() {
   const currentMonth = getTransactionsForMonth(monthValue);
 
   const [year, month] = monthValue.split("-");
-  const previousMonthDate = new Date(Number(year), Number(month) - 2, 1);
-  const prevMonthValue = `${previousMonthDate.getFullYear()}-${String(previousMonthDate.getMonth() + 1).padStart(2, "0")}`;
+  // SYNC FIX: compute the previous month in UTC for cross-device consistency.
+  const previousMonthDate = new Date(Date.UTC(Number(year), Number(month) - 2, 1));
+  const prevMonthValue = `${previousMonthDate.getUTCFullYear()}-${String(previousMonthDate.getUTCMonth() + 1).padStart(2, "0")}`;
   const previousMonth = getTransactionsForMonth(prevMonthValue);
 
   const currentExpenseTotal = currentMonth
@@ -1499,7 +1979,7 @@ function updateInsights() {
   if (topCategoryEl && topCategoryDetailEl) {
     if (topCategoryEntry) {
       topCategoryEl.textContent = translateCategory(topCategoryEntry[0]);
-      topCategoryDetailEl.textContent = `$${formatMoney(topCategoryEntry[1])}`;
+      topCategoryDetailEl.textContent = formatCurrency(topCategoryEntry[1]); // UI
     } else {
       topCategoryEl.textContent = "—";
       topCategoryDetailEl.textContent = t("noDataYet");
@@ -1521,6 +2001,27 @@ function updateInsights() {
       savingsRateDetailEl.textContent = t("noDataYet");
     }
   }
+
+  // UI: clickable highest income/expense day rows — tapping one drills into
+  // that day's transactions.
+  ensureInsightDayRows();
+
+  const incomeByDay = {};
+  const expenseByDay = {};
+  currentMonth.forEach((transaction) => {
+    const key = getDayKey(transaction.timestamp);
+    const amount = Number(transaction.amount);
+    if (transaction.type === "Income") {
+      incomeByDay[key] = (incomeByDay[key] || 0) + amount;
+    } else {
+      expenseByDay[key] = (expenseByDay[key] || 0) + amount;
+    }
+  });
+  const topIncomeDay = Object.entries(incomeByDay).sort((a, b) => b[1] - a[1])[0] || null;
+  const topExpenseDay = Object.entries(expenseByDay).sort((a, b) => b[1] - a[1])[0] || null;
+
+  updateInsightDayRow("insightIncomeDay", t("highestIncomeDay"), topIncomeDay);
+  updateInsightDayRow("insightExpenseDay", t("highestExpenseDay"), topExpenseDay);
 }
 
 function renderMonthlyTrendChart() {
@@ -1530,8 +2031,9 @@ function renderMonthlyTrendChart() {
   const grouped = {};
 
   transactions.forEach((transaction) => {
+    // SYNC FIX: group by the UTC month of the day-timestamp.
     const date = new Date(Number(transaction.timestamp));
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
     grouped[key] = grouped[key] || { income: 0, expense: 0 };
 
     if (transaction.type === "Income") {
@@ -1574,6 +2076,17 @@ function renderMonthlyTrendChart() {
       plugins: {
         legend: {
           labels: { color: colors.text }
+        },
+        tooltip: {
+          callbacks: {
+            // UI: tooltips honor the selected currency.
+            label: (context) => {
+              const parsed = context.parsed;
+              const value = parsed && typeof parsed.y === "number" ? parsed.y : parsed;
+              const datasetLabel = context.dataset && context.dataset.label ? `${context.dataset.label}: ` : "";
+              return ` ${datasetLabel}${formatCurrency(value)}`;
+            }
+          }
         }
       },
       scales: {
@@ -1631,6 +2144,16 @@ function renderCategoryExpenseChart() {
       plugins: {
         legend: {
           labels: { color: colors.text }
+        },
+        tooltip: {
+          callbacks: {
+            // UI: tooltips honor the selected currency.
+            label: (context) => {
+              const parsed = context.parsed;
+              const value = parsed && typeof parsed.y === "number" ? parsed.y : parsed;
+              return ` ${formatCurrency(value)}`;
+            }
+          }
         }
       }
     }
@@ -1678,6 +2201,8 @@ function clearFilters() {
   if (filterCategory) filterCategory.value = "All";
   if (sortOption) sortOption.value = "newest";
 
+  listDateFilter = null; // UI: also clear the insight drill-down
+
   updateUI();
 }
 
@@ -1691,7 +2216,7 @@ function saveBudget() {
   }
 
   budgets[category] = Number(amountValue);
-  localStorage.setItem("budgets", JSON.stringify(budgets));
+  persistBudgets(); // SYNC FIX: sync budgets to Firestore, not just localStorage
 
   const budgetAmount = document.getElementById("budgetAmount");
   if (budgetAmount) budgetAmount.value = "";
@@ -1720,6 +2245,7 @@ function createDayHeader(label) {
 function createTransactionItem(transaction) {
   const li = document.createElement("li");
   li.className = `transaction-item ${transaction.type === "Income" ? "income" : "expense"}`;
+  li.dataset.transactionId = transaction.id; // UI: swipe delegation target
 
   const left = document.createElement("div");
   left.className = "transaction-left";
@@ -1748,7 +2274,7 @@ function createTransactionItem(transaction) {
 
   const amount = document.createElement("span");
   amount.className = `transaction-amount ${transaction.type === "Income" ? "income-text" : "expense-text"}`;
-  amount.textContent = `${transaction.type === "Income" ? "+" : "-"}$${formatMoney(transaction.amount)}`;
+  amount.textContent = `${transaction.type === "Income" ? "+" : "-"}${formatCurrency(transaction.amount)}`; // UI
 
   const editBtn = document.createElement("button");
   editBtn.className = "small-btn edit-btn";
@@ -1769,8 +2295,29 @@ function createTransactionItem(transaction) {
   right.appendChild(editBtn);
   right.appendChild(deleteBtn);
 
-  li.appendChild(left);
-  li.appendChild(right);
+  // UI: swipe-to-edit/delete on touch devices. The card content slides over
+  // absolutely-positioned action buttons hidden behind it; on desktop the
+  // icon buttons above keep working exactly as before.
+  const content = document.createElement("div");
+  content.className = `transaction-swipe-content ${transaction.type === "Income" ? "income" : "expense"}`;
+  content.appendChild(left);
+  content.appendChild(right);
+
+  const editAction = document.createElement("button");
+  editAction.type = "button";
+  editAction.className = "swipe-action swipe-edit";
+  editAction.setAttribute("aria-label", t("swipeEdit"));
+  editAction.innerHTML = `<span aria-hidden="true">✏️</span><span class="swipe-action-label">${t("swipeEdit")}</span>`;
+
+  const deleteAction = document.createElement("button");
+  deleteAction.type = "button";
+  deleteAction.className = "swipe-action swipe-delete";
+  deleteAction.setAttribute("aria-label", t("swipeDelete"));
+  deleteAction.innerHTML = `<span aria-hidden="true">🗑️</span><span class="swipe-action-label">${t("swipeDelete")}</span>`;
+
+  li.appendChild(editAction);
+  li.appendChild(deleteAction);
+  li.appendChild(content);
 
   return li;
 }
@@ -1898,9 +2445,10 @@ function getNextBillDueDate(bill) {
 
 function isBillPaidThisMonth(bill) {
   const currentMonth = getCurrentMonthValue();
+  // SYNC FIX: compare UTC month keys so paid-this-month agrees everywhere.
   return (bill.paidDates || []).some((date) => {
     const paid = new Date(Number(date));
-    const monthValue = `${paid.getFullYear()}-${String(paid.getMonth() + 1).padStart(2, "0")}`;
+    const monthValue = `${paid.getUTCFullYear()}-${String(paid.getUTCMonth() + 1).padStart(2, "0")}`;
     return monthValue === currentMonth;
   });
 }
@@ -1950,6 +2498,8 @@ function renderBills() {
   const list = document.getElementById("billsList");
   if (!list) return;
 
+  renderBillCalendar(); // UI: month calendar with due-date dots
+
   const sortedBills = [...bills].sort((a, b) => Number(a.dueDate) - Number(b.dueDate));
   const monthlyTotal = sortedBills.reduce((sum, bill) => sum + Number(bill.amount || 0), 0);
   const today = getStartOfDay(getTodayInputValue());
@@ -1961,18 +2511,53 @@ function renderBills() {
   const dueSoonEl = document.getElementById("dueSoonBillsValue");
   const overdueEl = document.getElementById("overdueBillsValue");
   const paidEl = document.getElementById("paidBillsValue");
-  if (totalEl) totalEl.textContent = `$${formatMoney(monthlyTotal)}`;
+  if (totalEl) totalEl.textContent = formatCurrency(monthlyTotal); // UI
   if (dueSoonEl) dueSoonEl.textContent = dueSoonCount;
   if (overdueEl) overdueEl.textContent = overdueCount;
   if (paidEl) paidEl.textContent = paidCount;
 
   list.innerHTML = "";
-  if (sortedBills.length === 0) {
-    list.innerHTML = `<div class="empty-state">${t("noBillsFound")}</div>`;
+
+  // UI: friendly empty state with a CTA when no bills exist at all.
+  if (bills.length === 0) {
+    const panel = document.createElement("div");
+    panel.className = "empty-state-panel";
+    const icon = document.createElement("div");
+    icon.className = "empty-state-icon";
+    icon.textContent = "🧾";
+    const title = document.createElement("p");
+    title.className = "empty-state-title";
+    title.textContent = t("emptyBillsTitle");
+    const hint = document.createElement("p");
+    hint.className = "empty-state-hint";
+    hint.textContent = t("emptyBillsHint");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary-btn empty-state-btn";
+    btn.textContent = t("addFirstBill");
+    btn.addEventListener("click", () => {
+      document.getElementById("billsSection")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setTimeout(() => document.getElementById("billName")?.focus({ preventScroll: true }), 450);
+    });
+    panel.appendChild(icon);
+    panel.appendChild(title);
+    panel.appendChild(hint);
+    panel.appendChild(btn);
+    list.appendChild(panel);
     return;
   }
 
-  sortedBills.forEach((bill) => {
+  // UI: tapping a calendar day filters the list to bills due that day.
+  const visibleBills = billCalendarSelectedDay
+    ? sortedBills.filter((bill) => getDayKey(bill.dueDate) === billCalendarSelectedDay)
+    : sortedBills;
+
+  if (visibleBills.length === 0) {
+    list.innerHTML = `<div class="empty-state">${t("noBillsThisDay")}</div>`;
+    return;
+  }
+
+  visibleBills.forEach((bill) => {
     const status = getBillStatus(bill);
     const dayText = status.daysUntil < 0 ? `${Math.abs(status.daysUntil)}d late` : `${status.daysUntil}d`;
     const item = document.createElement("div");
@@ -1980,7 +2565,7 @@ function renderBills() {
     item.innerHTML = `
       <div class="stack-item-main">
         <span class="stack-item-title">${bill.name}</span>
-        <span class="stack-item-subtitle">$${formatMoney(bill.amount)} • ${translateCategory(bill.category)} • ${formatDate(bill.dueDate)}</span>
+        <span class="stack-item-subtitle">${formatCurrency(bill.amount)} • ${translateCategory(bill.category)} • ${formatDate(bill.dueDate)}</span>
         ${bill.notes ? `<span class="stack-item-subtitle">${bill.notes}</span>` : ""}
       </div>
       <div class="bill-actions">
@@ -2041,15 +2626,395 @@ async function processRecurringTransactions() {
     });
 
     for (const item of batchAdds) {
-      await db.collection("transactions").add(item);
+      // SYNC FIX: deterministic doc ID (template + date) so two devices
+      // generating the same occurrence converge on one doc instead of
+      // creating duplicates. Never deletes user data.
+      const deterministicId = `${item.generatedFromBaseId}_${item.generatedForDate}`;
+      await db.collection("transactions").doc(deterministicId).set(item);
     }
   } catch (error) {
-    console.error("Recurring generation error:", error);
+    reportSyncWriteError(error, "recurring transactions");
   } finally {
     recurringProcessing = false;
   }
 }
 
+// ---------------------------------------------------------------------------
+// UI: interface improvements.
+//
+//  1. Bill calendar with due-date dots + day filter
+//  2. Swipe-to-edit/delete on transaction rows (touch devices only)
+//  3. Budget health colors on progress bars
+//  4. Friendly empty states with CTAs
+//  5. Hero Month | Week toggle
+//  6. Currency setting (see formatCurrency / persistCurrency / loadCurrencySync)
+//  7. Tappable sync badge (wired in DOMContentLoaded)
+//  8. Clickable highest income/expense day rows in Smart Insights
+// ---------------------------------------------------------------------------
+
+// --- Hero Month | Week toggle ------------------------------------------------
+function getHeroPeriodRange() {
+  // Returns { start, end, label } for the hero summary's selected period.
+  // Month = current UTC month; Week = current week Monday–Sunday in UTC.
+  if (heroPeriod === "week") {
+    const now = new Date();
+    const dayIndex = (now.getUTCDay() + 6) % 7; // Monday = 0
+    const monday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - dayIndex * 86400000;
+    const sundayEnd = monday + 6 * 86400000 + 86399999;
+    return {
+      start: monday,
+      end: sundayEnd,
+      label: `${t("weekOf")} ${formatDate(monday)}`
+    };
+  }
+  const monthValue = getCurrentMonthValue();
+  const [year, month] = monthValue.split("-");
+  return {
+    start: Date.UTC(Number(year), Number(month) - 1, 1),
+    end: Date.UTC(Number(year), Number(month), 0, 23, 59, 59, 999),
+    label: formatMonthLabel(monthValue)
+  };
+}
+
+function buildPeriodToggle() {
+  // Segmented Month | Week control, inserted above the hero summary cards.
+  const heroCard = document.getElementById("balanceSection");
+  const summaryGrid = heroCard && heroCard.querySelector(".summary-grid");
+  if (!heroCard || !summaryGrid || document.getElementById("periodToggle")) return;
+
+  const label = document.createElement("p");
+  label.id = "heroPeriodLabel";
+  label.className = "period-label";
+
+  const toggle = document.createElement("div");
+  toggle.id = "periodToggle";
+  toggle.className = "period-toggle";
+  toggle.setAttribute("role", "group");
+  ["month", "week"].forEach((period) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.period = period;
+    btn.addEventListener("click", () => {
+      heroPeriod = period;
+      localStorage.setItem("expense_tracker_hero_period", heroPeriod);
+      updateUI();
+    });
+    toggle.appendChild(btn);
+  });
+
+  heroCard.insertBefore(label, summaryGrid);
+  heroCard.insertBefore(toggle, summaryGrid);
+}
+
+function renderPeriodToggle() {
+  const toggle = document.getElementById("periodToggle");
+  if (toggle) {
+    toggle.querySelectorAll("button").forEach((btn) => {
+      const period = btn.dataset.period;
+      btn.textContent = period === "month" ? t("periodMonth") : t("periodWeek");
+      btn.classList.toggle("active", heroPeriod === period);
+      btn.setAttribute("aria-pressed", heroPeriod === period ? "true" : "false");
+    });
+  }
+  const label = document.getElementById("heroPeriodLabel");
+  if (label) label.textContent = getHeroPeriodRange().label;
+}
+
+// --- Currency picker -----------------------------------------------------------
+function buildCurrencySelect() {
+  // Compact currency <select> in the header, next to the theme/language buttons.
+  const topActions = document.querySelector(".top-actions");
+  if (!topActions || document.getElementById("currencySelect")) return;
+
+  const select = document.createElement("select");
+  select.id = "currencySelect";
+  select.className = "currency-select";
+  select.setAttribute("aria-label", t("currency"));
+  select.title = t("currency");
+
+  SUPPORTED_CURRENCIES.forEach((code) => {
+    const option = document.createElement("option");
+    option.value = code;
+    option.textContent = code;
+    select.appendChild(option);
+  });
+  select.value = SUPPORTED_CURRENCIES.includes(appCurrency) ? appCurrency : "USD";
+
+  select.addEventListener("change", () => {
+    appCurrency = select.value;
+    persistCurrency();
+    updateUI();
+  });
+
+  const themeBtn = document.getElementById("themeToggleBtn");
+  topActions.insertBefore(select, themeBtn);
+}
+
+function syncCurrencySelect() {
+  const select = document.getElementById("currencySelect");
+  if (!select) return;
+  select.value = SUPPORTED_CURRENCIES.includes(appCurrency) ? appCurrency : "USD";
+  select.setAttribute("aria-label", t("currency"));
+  select.title = t("currency");
+}
+
+function stripHardcodedCurrencySymbols() {
+  // formatCurrency() now owns the symbol; remove the static "$" text nodes
+  const ids = ["income", "expenses", "rangeIncome", "rangeExpenses", "monthIncome", "monthExpenses"];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    const parent = el && el.parentElement;
+    if (!parent) return;
+    [...parent.childNodes].forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE && node.textContent.includes("$")) {
+        node.textContent = node.textContent.replace(/\$/g, "");
+      }
+    });
+  });
+}
+
+// --- Bill calendar ---------------------------------------------------------------
+function getBillCalendarMonthParts() {
+  const [year, month] = (billCalendarMonth || getCurrentMonthValue()).split("-");
+  return { year: Number(year), month: Number(month) };
+}
+
+function renderBillCalendar() {
+  // Compact month calendar above the bill list. Dots mark days with bills
+  // due; tapping a day filters the list below to that day's bills.
+  const list = document.getElementById("billsList");
+  const block = list && list.closest(".combined-list-block");
+  if (!block) return;
+
+  let container = document.getElementById("billCalendar");
+  if (bills.length === 0) {
+    if (container) container.remove();
+    return;
+  }
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "billCalendar";
+    container.className = "bill-calendar";
+    block.insertBefore(container, block.firstChild);
+  }
+
+  const { year, month } = getBillCalendarMonthParts();
+  const locale = currentLanguage === "es" ? "es-ES" : undefined;
+
+  const dueDays = {};
+  bills.forEach((bill) => {
+    const key = getDayKey(bill.dueDate);
+    dueDays[key] = (dueDays[key] || 0) + 1;
+  });
+
+  const mondayBase = Date.UTC(2026, 8, 21); // a Monday — weekday names start here
+  let weekdayRow = "";
+  for (let i = 0; i < 7; i++) {
+    const name = new Date(mondayBase + i * 86400000).toLocaleDateString(locale, {
+      weekday: "short",
+      timeZone: "UTC"
+    });
+    weekdayRow += `<span class="bill-cal-weekday">${name}</span>`;
+  }
+
+  const startOffset = (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+  let cells = "";
+  for (let i = 0; i < startOffset; i++) cells += '<span class="bill-cal-day empty"></span>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const selected = billCalendarSelectedDay === key ? " selected" : "";
+    const dot = dueDays[key] ? '<span class="bill-cal-dot"></span>' : "";
+    cells += `<button type="button" class="bill-cal-day${selected}" data-day="${key}"><span class="bill-cal-num">${day}</span>${dot}</button>`;
+  }
+
+  const clearChip = billCalendarSelectedDay
+    ? `<div class="bill-cal-clear-row"><button type="button" class="bill-cal-clear" data-clear-day>✕ ${formatDate(getStartOfDay(billCalendarSelectedDay))} · ${t("billCalClear")}</button></div>`
+    : "";
+
+  container.innerHTML = `
+    <div class="bill-cal-header">
+      <button type="button" class="bill-cal-nav" data-cal-nav="-1" aria-label="‹">‹</button>
+      <span class="bill-cal-title">${formatMonthLabel(billCalendarMonth)}</span>
+      <button type="button" class="bill-cal-nav" data-cal-nav="1" aria-label="›">›</button>
+    </div>
+    <div class="bill-cal-weekdays">${weekdayRow}</div>
+    <div class="bill-cal-grid">${cells}</div>
+    ${clearChip}`;
+
+  container.querySelectorAll("[data-day]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.getAttribute("data-day");
+      billCalendarSelectedDay = billCalendarSelectedDay === key ? null : key;
+      renderBills();
+    });
+  });
+  container.querySelectorAll("[data-cal-nav]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const delta = Number(btn.getAttribute("data-cal-nav"));
+      const shifted = new Date(addMonths(Date.UTC(year, month - 1, 1), delta));
+      billCalendarMonth = `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+      renderBillCalendar();
+    });
+  });
+  const clearBtn = container.querySelector("[data-clear-day]");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      billCalendarSelectedDay = null;
+      renderBills();
+    });
+  }
+}
+
+// --- Swipe actions on transactions (touch devices only) -------------------------
+const SWIPE_REVEAL_PX = 110;
+const SWIPE_COMMIT_PX = 60;
+let swipeTouchState = null;
+let suppressClickAfterSwipe = false;
+
+function closeSwipeItem() {
+  if (!swipeOpenItem) return;
+  const content = swipeOpenItem.querySelector(".transaction-swipe-content");
+  if (content) content.style.transform = "";
+  swipeOpenItem.classList.remove("swiping", "swipe-open");
+  swipeOpenItem = null;
+}
+
+function setupTransactionSwipe() {
+  if (!("ontouchstart" in window)) return; // touch devices only; desktop keeps icon buttons
+  const list = document.getElementById("list");
+  if (!list || list.dataset.swipeReady) return;
+  list.dataset.swipeReady = "true";
+
+  list.addEventListener("touchstart", (event) => {
+    const item = event.target.closest(".transaction-item");
+    if (swipeOpenItem && item !== swipeOpenItem) closeSwipeItem();
+    if (!item) return;
+    const touch = event.touches[0];
+    swipeTouchState = {
+      item,
+      content: item.querySelector(".transaction-swipe-content"),
+      startX: touch.clientX,
+      dx: 0,
+      moved: false
+    };
+    item.classList.add("swiping");
+    if (swipeTouchState.content) swipeTouchState.content.style.transition = "none";
+  }, { passive: true });
+
+  list.addEventListener("touchmove", (event) => {
+    if (!swipeTouchState || !swipeTouchState.content) return;
+    const touch = event.touches[0];
+    const dx = touch.clientX - swipeTouchState.startX;
+    if (Math.abs(dx) > 8) swipeTouchState.moved = true;
+    const clamped = Math.max(-SWIPE_REVEAL_PX, Math.min(SWIPE_REVEAL_PX, dx));
+    swipeTouchState.dx = clamped;
+    swipeTouchState.content.style.transform = `translateX(${clamped}px)`;
+  }, { passive: true });
+
+  list.addEventListener("touchend", () => {
+    if (!swipeTouchState || !swipeTouchState.content) {
+      swipeTouchState = null;
+      return;
+    }
+    const { item, content, dx, moved } = swipeTouchState;
+    content.style.transition = "";
+    if (moved && dx <= -SWIPE_COMMIT_PX) {
+      content.style.transform = `translateX(${-SWIPE_REVEAL_PX}px)`;
+      swipeOpenItem = item;
+      item.classList.remove("swiping");
+      item.classList.add("swipe-open");
+      suppressClickAfterSwipe = true;
+    } else if (moved && dx >= SWIPE_COMMIT_PX) {
+      content.style.transform = `translateX(${SWIPE_REVEAL_PX}px)`;
+      swipeOpenItem = item;
+      item.classList.remove("swiping");
+      item.classList.add("swipe-open");
+      suppressClickAfterSwipe = true;
+    } else {
+      content.style.transform = "";
+      item.classList.remove("swiping", "swipe-open");
+      if (swipeOpenItem === item) swipeOpenItem = null;
+    }
+    swipeTouchState = null;
+    setTimeout(() => { suppressClickAfterSwipe = false; }, 80);
+  });
+
+  // Capture phase so a tap right after a swipe never leaks through to buttons.
+  list.addEventListener("click", (event) => {
+    if (suppressClickAfterSwipe) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    const actionBtn = event.target.closest(".swipe-action");
+    if (!actionBtn) return;
+    event.stopPropagation();
+    const item = actionBtn.closest(".transaction-item");
+    const id = item && item.dataset.transactionId;
+    const transaction = transactions.find((tx) => tx.id === id);
+    closeSwipeItem();
+    if (!transaction) return;
+    if (actionBtn.classList.contains("swipe-delete")) {
+      if (confirm(t("confirmDelete"))) deleteTransaction(transaction.id);
+    } else {
+      openEditModal(transaction);
+    }
+  }, true);
+
+  document.addEventListener("touchstart", (event) => {
+    if (swipeOpenItem && !event.target.closest(".transaction-item")) closeSwipeItem();
+  }, { passive: true });
+}
+
+// --- Clickable insight days --------------------------------------------------------
+function ensureInsightDayRows() {
+  const grid = document.querySelector(".insights-grid");
+  if (!grid || document.getElementById("insightIncomeDay")) return;
+
+  ["insightIncomeDay", "insightExpenseDay"].forEach((id) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = id;
+    btn.className = "mini-stat insight-clickable";
+    btn.innerHTML = '<span class="insight-label"></span><strong class="insight-value">—</strong><small class="insight-date">—</small><span class="insight-chevron" aria-hidden="true">›</span>';
+    btn.addEventListener("click", () => {
+      if (btn.dataset.dayKey) drillIntoDay(btn.dataset.dayKey);
+    });
+    grid.appendChild(btn);
+  });
+}
+
+function updateInsightDayRow(id, label, topDay) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.querySelector(".insight-label").textContent = label;
+  if (topDay) {
+    btn.querySelector(".insight-value").textContent = formatCurrency(topDay[1]);
+    btn.querySelector(".insight-date").textContent = formatDate(getStartOfDay(topDay[0]));
+    btn.dataset.dayKey = topDay[0];
+    btn.title = t("viewDayTransactions");
+  } else {
+    btn.querySelector(".insight-value").textContent = "—";
+    btn.querySelector(".insight-date").textContent = t("noDataYet");
+    btn.dataset.dayKey = "";
+    btn.removeAttribute("title");
+  }
+}
+
+function drillIntoDay(dayKey) {
+  // Show exactly one day's transactions: set the range inputs, filter the
+  // transaction list to that day, then jump to the Transactions section.
+  const rangeStart = document.getElementById("rangeStart");
+  const rangeEnd = document.getElementById("rangeEnd");
+  if (rangeStart) rangeStart.value = dayKey;
+  if (rangeEnd) rangeEnd.value = dayKey;
+  listDateFilter = dayKey;
+  applyRangeSummary();
+  updateUI();
+  scrollToAppSection("transactionsSection");
+}
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
@@ -2057,8 +3022,11 @@ function registerServiceWorker() {
 }
 
 function updateUI() {
+  swipeOpenItem = null; // UI: the list is rebuilt, drop any open swipe row
   translateStaticText();
   refreshLanguageSensitiveSelects();
+  renderPeriodToggle(); // UI
+  syncCurrencySelect(); // UI
 
   const list = document.getElementById("list");
   if (!list) return;
@@ -2066,16 +3034,22 @@ function updateUI() {
   list.innerHTML = "";
 
   let balance = 0;
-  let income = 0;
-  let expenses = 0;
+  let periodIncome = 0;
+  let periodExpenses = 0;
+
+  // UI: hero income/expenses follow the selected period (Month/Week);
+  // Current Balance stays all-time.
+  const heroRange = getHeroPeriodRange();
 
   transactions.forEach((transaction) => {
+    const amount = Number(transaction.amount);
+    const timestamp = Number(transaction.timestamp);
     if (transaction.type === "Income") {
-      balance += Number(transaction.amount);
-      income += Number(transaction.amount);
+      balance += amount;
+      if (timestamp >= heroRange.start && timestamp <= heroRange.end) periodIncome += amount;
     } else {
-      balance -= Number(transaction.amount);
-      expenses += Number(transaction.amount);
+      balance -= amount;
+      if (timestamp >= heroRange.start && timestamp <= heroRange.end) periodExpenses += amount;
     }
   });
 
@@ -2083,9 +3057,9 @@ function updateUI() {
   const incomeEl = document.getElementById("income");
   const expensesEl = document.getElementById("expenses");
 
-  if (balanceEl) balanceEl.textContent = `$${formatMoney(balance)}`;
-  if (incomeEl) incomeEl.textContent = formatMoney(income);
-  if (expensesEl) expensesEl.textContent = formatMoney(expenses);
+  if (balanceEl) balanceEl.textContent = formatCurrency(balance); // UI
+  if (incomeEl) incomeEl.textContent = formatCurrency(periodIncome); // UI
+  if (expensesEl) expensesEl.textContent = formatCurrency(periodExpenses); // UI
 
   const filteredTransactions = getFilteredTransactions();
   const toggleTransactionsBtn = document.getElementById("toggleTransactionsBtn");
@@ -2094,7 +3068,35 @@ function updateUI() {
     : filteredTransactions.slice(0, 4);
 
   if (filteredTransactions.length === 0) {
-    list.innerHTML = `<li class="empty-state">${t("noTransactionsFound")}</li>`;
+    if (transactions.length === 0) {
+      // UI: friendly first-run empty state with a CTA.
+      const panel = document.createElement("li");
+      panel.className = "empty-state-panel";
+      const icon = document.createElement("div");
+      icon.className = "empty-state-icon";
+      icon.textContent = "💸";
+      const title = document.createElement("p");
+      title.className = "empty-state-title";
+      title.textContent = t("emptyTransactionsTitle");
+      const hint = document.createElement("p");
+      hint.className = "empty-state-hint";
+      hint.textContent = t("emptyTransactionsHint");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary-btn empty-state-btn";
+      btn.textContent = t("addFirstTransaction");
+      btn.addEventListener("click", () => {
+        document.getElementById("addTransactionSection")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setTimeout(() => document.getElementById("desc")?.focus({ preventScroll: true }), 450);
+      });
+      panel.appendChild(icon);
+      panel.appendChild(title);
+      panel.appendChild(hint);
+      panel.appendChild(btn);
+      list.appendChild(panel);
+    } else {
+      list.innerHTML = `<li class="empty-state">${t("noTransactionsFound")}</li>`;
+    }
     if (toggleTransactionsBtn) toggleTransactionsBtn.classList.add("hidden");
   } else {
     const grouped = groupTransactionsByDay(visibleTransactions);
@@ -2244,6 +3246,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const billDueDate = document.getElementById("billDueDate");
   if (billDueDate) billDueDate.value = getTodayInputValue();
 
+  // UI: build dynamic controls and strip static currency symbols before
+  // any cached render happens, so amounts never render with a doubled symbol.
+  buildCurrencySelect();
+  buildPeriodToggle();
+  setupTransactionSwipe();
+  buildDeviceIdCard(); // AUTH: device ID card for security rules
+  updateDeviceIdUI();
+  stripHardcodedCurrencySymbols();
+
   populateCategorySelects();
   loadCachedTransactions();
   loadCachedBills();
@@ -2322,8 +3333,13 @@ document.addEventListener("DOMContentLoaded", () => {
     document.body.setAttribute("data-theme", savedTheme);
   }
 
+  document.getElementById("syncBadge")?.addEventListener("click", () => {
+    // UI: tappable badge forces a full re-render.
+    updateUI();
+    showToast(t("upToDate"));
+  });
+
   translateStaticText();
   populateCategorySelects();
-  loadTransactions();
-  loadBills();
+  ensureAuthenticated(); // AUTH: listeners attach only after Google sign-in
 });
