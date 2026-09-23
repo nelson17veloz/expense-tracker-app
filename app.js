@@ -27,6 +27,10 @@ let currentLanguage = localStorage.getItem("language") || "en";
 let recurringProcessing = false;
 let transactionListExpanded = false;
 
+// AUTH: lock all app info behind Google sign-in. The app shell stays
+// hidden until Firebase Auth reports a signed-in user.
+if (document.body) document.body.classList.add("auth-locked");
+
 // UI: state for the UI improvements (period toggle, currency, bill calendar,
 // transaction list date filter, swipe). heroPeriod is a per-device preference.
 let heroPeriod = localStorage.getItem("expense_tracker_hero_period") || "month";
@@ -235,6 +239,10 @@ const translations = {
     viewDayTransactions: "View transactions for this day",
     signInSubtext: "Sign in to sync your data across devices.",
     signInWithGoogle: "Sign in with Google",
+    authFeature1: "Syncs across all your devices",
+    authFeature2: "Private to your Google account",
+    authFeature3: "Works offline, syncs on reconnect",
+    authSecureNote: "Secured by Google sign-in",
     signInError: "Sign-in failed. Please try again.",
     enableGoogleProvider: "Enable Google sign-in in Firebase Console \u2192 Authentication \u2192 Sign-in method, then try again.",
     unauthorizedDomain: "This site\u2019s domain isn\u2019t authorized for sign-in. Add it in Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
@@ -419,6 +427,10 @@ const translations = {
     viewDayTransactions: "Ver los movimientos de este día",
     signInSubtext: "Inicia sesión para sincronizar tus datos en todos tus dispositivos.",
     signInWithGoogle: "Iniciar sesión con Google",
+    authFeature1: "Se sincroniza en todos tus dispositivos",
+    authFeature2: "Privado para tu cuenta de Google",
+    authFeature3: "Funciona sin conexión y se sincroniza al reconectar",
+    authSecureNote: "Protegido con inicio de sesión de Google",
     signInError: "Error al iniciar sesión. Inténtalo de nuevo.",
     enableGoogleProvider: "Activa el inicio de sesión con Google en Firebase Console \u2192 Authentication \u2192 Sign-in method e inténtalo de nuevo.",
     unauthorizedDomain: "El dominio de este sitio no est\u00e1 autorizado para iniciar sesi\u00f3n. Agr\u00e9galo en Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
@@ -793,11 +805,14 @@ function ensureAuthenticated() {
   firebase.auth().onAuthStateChanged((user) => {
     if (user) {
       authUid = user.uid;
+      document.body.classList.remove("auth-locked");
       hideSignInOverlay();
       updateDeviceIdUI();
       startFirestoreListeners();
     } else {
       authUid = null;
+      clearLockedData();
+      document.body.classList.add("auth-locked");
       updateDeviceIdUI();
       showSignInOverlay();
     }
@@ -808,6 +823,8 @@ function startFirestoreListeners() {
   // AUTH: single gate — nothing here runs before a user exists.
   if (authListenersStarted) return;
   authListenersStarted = true;
+  loadCachedTransactions();
+  loadCachedBills();
   loadTransactions();
   loadBills();
   loadBudgets();
@@ -815,9 +832,20 @@ function startFirestoreListeners() {
   loadCurrencySync();
 }
 
+// AUTH: wipe rendered data when the session ends so no info lingers
+// behind the sign-in gate.
+function clearLockedData() {
+  transactions = [];
+  bills = [];
+  const list = document.getElementById("list");
+  if (list) list.innerHTML = "";
+  const billsList = document.getElementById("billsList");
+  if (billsList) billsList.innerHTML = "";
+}
+
 async function signInWithGoogle() {
-  const provider = new firebase.auth.GoogleAuthProvider();
   try {
+    const provider = new firebase.auth.GoogleAuthProvider();
     await firebase.auth().signInWithPopup(provider);
     // Success is handled by the onAuthStateChanged listener.
   } catch (error) {
@@ -868,37 +896,77 @@ function showSignInOverlay() {
   overlay.className = "auth-overlay";
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
+
   const card = document.createElement("div");
   card.className = "auth-card";
-  const logo = document.createElement("div");
-  logo.className = "auth-logo";
-  logo.textContent = "\uD83D\uDCB0";
+
+  const brand = document.createElement("div");
+  brand.className = "auth-brand";
+  const logo = document.createElement("img");
+  logo.className = "auth-logo-img";
+  logo.src = "Logo.PNG";
+  logo.alt = "Expense Tracker logo";
+  const eyebrow = document.createElement("p");
+  eyebrow.className = "auth-eyebrow";
+  eyebrow.setAttribute("data-i18n", "eyebrow");
+  eyebrow.textContent = t("eyebrow");
+  brand.appendChild(logo);
+  brand.appendChild(eyebrow);
+
   const title = document.createElement("h2");
   title.className = "auth-title";
   title.setAttribute("data-i18n", "appTitle");
   title.textContent = t("appTitle");
+
   const sub = document.createElement("p");
   sub.className = "auth-sub";
   sub.setAttribute("data-i18n", "signInSubtext");
   sub.textContent = t("signInSubtext");
+
   const btn = document.createElement("button");
   btn.type = "button";
   btn.id = "googleSignInBtn";
   btn.className = "auth-google-btn";
   const g = document.createElement("span");
   g.className = "auth-google-g";
-  g.textContent = "G";
   g.setAttribute("aria-hidden", "true");
+  g.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"/></svg>';
   const label = document.createElement("span");
   label.setAttribute("data-i18n", "signInWithGoogle");
   label.textContent = t("signInWithGoogle");
   btn.appendChild(g);
   btn.appendChild(label);
   btn.addEventListener("click", signInWithGoogle);
-  card.appendChild(logo);
+
+  const features = document.createElement("ul");
+  features.className = "auth-features";
+  ["authFeature1", "authFeature2", "authFeature3"].forEach((key) => {
+    const li = document.createElement("li");
+    const check = document.createElement("span");
+    check.className = "auth-check";
+    check.setAttribute("aria-hidden", "true");
+    check.textContent = "\u2713";
+    const text = document.createElement("span");
+    text.setAttribute("data-i18n", key);
+    text.textContent = t(key);
+    li.appendChild(check);
+    li.appendChild(text);
+    features.appendChild(li);
+  });
+
+  const secure = document.createElement("p");
+  secure.className = "auth-secure-note";
+  const secureText = document.createElement("span");
+  secureText.setAttribute("data-i18n", "authSecureNote");
+  secureText.textContent = t("authSecureNote");
+  secure.appendChild(secureText);
+
+  card.appendChild(brand);
   card.appendChild(title);
   card.appendChild(sub);
   card.appendChild(btn);
+  card.appendChild(features);
+  card.appendChild(secure);
   overlay.appendChild(card);
   document.body.prepend(overlay);
 }
@@ -3256,8 +3324,7 @@ document.addEventListener("DOMContentLoaded", () => {
   stripHardcodedCurrencySymbols();
 
   populateCategorySelects();
-  loadCachedTransactions();
-  loadCachedBills();
+  // AUTH: cached data loads only after sign-in (inside startFirestoreListeners).
   registerServiceWorker();
 
   document.getElementById("monthPicker")?.addEventListener("change", () => {
@@ -3341,5 +3408,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   translateStaticText();
   populateCategorySelects();
-  ensureAuthenticated(); // AUTH: listeners attach only after Google sign-in
+  try {
+    ensureAuthenticated(); // AUTH: listeners attach only after Google sign-in
+  } catch (error) {
+    console.error("Auth init failed:", error);
+    document.body.classList.add("auth-locked");
+    showSignInOverlay();
+    showToast(t("signInError"));
+  }
 });

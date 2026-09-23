@@ -1,4 +1,4 @@
-const CACHE_NAME = "expense-tracker-shell-v10";
+const CACHE_NAME = "expense-tracker-shell-v11";
 const ASSETS = [
   "./",
   "./index.html",
