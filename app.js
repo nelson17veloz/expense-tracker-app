@@ -34,6 +34,8 @@ if (document.body) document.body.classList.add("auth-locked");
 // UI: state for the UI improvements (period toggle, currency, bill calendar,
 // transaction list date filter, swipe). heroPeriod is a per-device preference.
 let heroPeriod = localStorage.getItem("expense_tracker_hero_period") || "month";
+const HERO_PERIODS = ["week", "month", "3months", "6months", "year", "all"];
+if (!HERO_PERIODS.includes(heroPeriod)) heroPeriod = "month";
 let appCurrency = localStorage.getItem("expense_tracker_currency") || "USD";
 let listDateFilter = null;
 let billCalendarMonth = getCurrentMonthValue();
@@ -219,6 +221,8 @@ const translations = {
     // UI: strings for the UI improvements
     billCalClear: "Clear",
     noBillsThisDay: "No bills due this day.",
+    dayActivity: "Day Activity",
+    noDayActivity: "No income or expenses recorded this day.",
     swipeEdit: "Edit",
     swipeDelete: "Delete",
     emptyTransactionsTitle: "No transactions yet",
@@ -230,6 +234,10 @@ const translations = {
     emptyBudgetsHint: "Use the form above to set your first budget.",
     periodMonth: "Month",
     periodWeek: "Week",
+    period3Months: "3 Months",
+    period6Months: "6 Months",
+    periodYear: "Year",
+    periodAllTime: "All Time",
     weekOf: "Week of",
     currency: "Currency",
     upToDate: "Everything is up to date",
@@ -407,6 +415,8 @@ const translations = {
     // UI: strings for the UI improvements
     billCalClear: "Limpiar",
     noBillsThisDay: "No hay facturas para este día.",
+    dayActivity: "Actividad del día",
+    noDayActivity: "Sin ingresos ni gastos registrados este día.",
     swipeEdit: "Editar",
     swipeDelete: "Eliminar",
     emptyTransactionsTitle: "Aún no hay movimientos",
@@ -418,6 +428,10 @@ const translations = {
     emptyBudgetsHint: "Usa el formulario de arriba para crear tu primer presupuesto.",
     periodMonth: "Mes",
     periodWeek: "Semana",
+    period3Months: "3 Meses",
+    period6Months: "6 Meses",
+    periodYear: "A\u00f1o",
+    periodAllTime: "Todo el tiempo",
     weekOf: "Semana del",
     currency: "Moneda",
     upToDate: "Todo está actualizado",
@@ -2714,16 +2728,34 @@ async function processRecurringTransactions() {
 //  2. Swipe-to-edit/delete on transaction rows (touch devices only)
 //  3. Budget health colors on progress bars
 //  4. Friendly empty states with CTAs
-//  5. Hero Month | Week toggle
+// 5. Hero period toggle (Week / Month / 3 Months / 6 Months / Year / All Time)
 //  6. Currency setting (see formatCurrency / persistCurrency / loadCurrencySync)
 //  7. Tappable sync badge (wired in DOMContentLoaded)
 //  8. Clickable highest income/expense day rows in Smart Insights
 // ---------------------------------------------------------------------------
 
-// --- Hero Month | Week toggle ------------------------------------------------
+// --- Hero period toggle (Week / Month / 3 Months / 6 Months / Year / All Time) ---
+function getTrailingMonthsRange(monthCount) {
+  // Returns { start, end, label } for the last `monthCount` UTC months,
+  // ending with the current month.
+  const now = new Date();
+  const endYear = now.getUTCFullYear();
+  const endMonth = now.getUTCMonth(); // 0-based
+  const startDate = new Date(Date.UTC(endYear, endMonth - (monthCount - 1), 1));
+  const startValue = `${startDate.getUTCFullYear()}-${String(startDate.getUTCMonth() + 1).padStart(2, "0")}`;
+  const endValue = `${endYear}-${String(endMonth + 1).padStart(2, "0")}`;
+  return {
+    start: startDate.getTime(),
+    end: Date.UTC(endYear, endMonth + 1, 0, 23, 59, 59, 999),
+    label: `${formatMonthLabel(startValue)} \u2013 ${formatMonthLabel(endValue)}`
+  };
+}
+
 function getHeroPeriodRange() {
   // Returns { start, end, label } for the hero summary's selected period.
-  // Month = current UTC month; Week = current week Monday–Sunday in UTC.
+  // Week = current week Monday–Sunday in UTC; Month = current UTC month;
+  // 3/6 Months = trailing UTC months ending now; Year = current UTC year;
+  // All = the full lifetime of the account's data.
   if (heroPeriod === "week") {
     const now = new Date();
     const dayIndex = (now.getUTCDay() + 6) % 7; // Monday = 0
@@ -2733,6 +2765,23 @@ function getHeroPeriodRange() {
       start: monday,
       end: sundayEnd,
       label: `${t("weekOf")} ${formatDate(monday)}`
+    };
+  }
+  if (heroPeriod === "3months") return getTrailingMonthsRange(3);
+  if (heroPeriod === "6months") return getTrailingMonthsRange(6);
+  if (heroPeriod === "year") {
+    const year = new Date().getUTCFullYear();
+    return {
+      start: Date.UTC(year, 0, 1),
+      end: Date.UTC(year, 11, 31, 23, 59, 59, 999),
+      label: `${year}`
+    };
+  }
+  if (heroPeriod === "all") {
+    return {
+      start: 0,
+      end: Date.now(),
+      label: t("periodAllTime")
     };
   }
   const monthValue = getCurrentMonthValue();
@@ -2758,7 +2807,7 @@ function buildPeriodToggle() {
   toggle.id = "periodToggle";
   toggle.className = "period-toggle";
   toggle.setAttribute("role", "group");
-  ["month", "week"].forEach((period) => {
+  HERO_PERIODS.forEach((period) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.dataset.period = period;
@@ -2777,9 +2826,17 @@ function buildPeriodToggle() {
 function renderPeriodToggle() {
   const toggle = document.getElementById("periodToggle");
   if (toggle) {
+    const periodLabelKeys = {
+      week: "periodWeek",
+      month: "periodMonth",
+      "3months": "period3Months",
+      "6months": "period6Months",
+      year: "periodYear",
+      all: "periodAllTime"
+    };
     toggle.querySelectorAll("button").forEach((btn) => {
       const period = btn.dataset.period;
-      btn.textContent = period === "month" ? t("periodMonth") : t("periodWeek");
+      btn.textContent = t(periodLabelKeys[period] || "periodMonth");
       btn.classList.toggle("active", heroPeriod === period);
       btn.setAttribute("aria-pressed", heroPeriod === period ? "true" : "false");
     });
@@ -2849,13 +2906,14 @@ function getBillCalendarMonthParts() {
 
 function renderBillCalendar() {
   // Compact month calendar above the bill list. Dots mark days with bills
-  // due; tapping a day filters the list below to that day's bills.
+  // due (amber), income (green), and expenses (red); tapping a day filters
+  // the list below to that day's bills and shows the day's money activity.
   const list = document.getElementById("billsList");
   const block = list && list.closest(".combined-list-block");
   if (!block) return;
 
   let container = document.getElementById("billCalendar");
-  if (bills.length === 0) {
+  if (bills.length === 0 && transactions.length === 0) {
     if (container) container.remove();
     return;
   }
@@ -2873,6 +2931,15 @@ function renderBillCalendar() {
   bills.forEach((bill) => {
     const key = getDayKey(bill.dueDate);
     dueDays[key] = (dueDays[key] || 0) + 1;
+  });
+  // UI: mark days that have income or expenses recorded, so the calendar
+  // shows money activity at a glance alongside bill due dates.
+  const incomeDays = {};
+  const expenseDays = {};
+  transactions.forEach((transaction) => {
+    const key = getDayKey(transaction.timestamp);
+    if (transaction.type === "Income") incomeDays[key] = true;
+    else expenseDays[key] = true;
   });
 
   const mondayBase = Date.UTC(2026, 8, 21); // a Monday — weekday names start here
@@ -2893,9 +2960,17 @@ function renderBillCalendar() {
   for (let day = 1; day <= daysInMonth; day++) {
     const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const selected = billCalendarSelectedDay === key ? " selected" : "";
-    const dot = dueDays[key] ? '<span class="bill-cal-dot"></span>' : "";
-    cells += `<button type="button" class="bill-cal-day${selected}" data-day="${key}"><span class="bill-cal-num">${day}</span>${dot}</button>`;
+    let dots = "";
+    if (dueDays[key]) dots += '<span class="bill-cal-dot bill"></span>';
+    if (incomeDays[key]) dots += '<span class="bill-cal-dot income"></span>';
+    if (expenseDays[key]) dots += '<span class="bill-cal-dot expense"></span>';
+    const dotsRow = dots ? `<span class="bill-cal-dots">${dots}</span>` : "";
+    cells += `<button type="button" class="bill-cal-day${selected}" data-day="${key}"><span class="bill-cal-num">${day}</span>${dotsRow}</button>`;
   }
+
+  const dayActivityPanel = billCalendarSelectedDay
+    ? buildDayActivityPanel(billCalendarSelectedDay)
+    : "";
 
   const clearChip = billCalendarSelectedDay
     ? `<div class="bill-cal-clear-row"><button type="button" class="bill-cal-clear" data-clear-day>✕ ${formatDate(getStartOfDay(billCalendarSelectedDay))} · ${t("billCalClear")}</button></div>`
@@ -2909,6 +2984,7 @@ function renderBillCalendar() {
     </div>
     <div class="bill-cal-weekdays">${weekdayRow}</div>
     <div class="bill-cal-grid">${cells}</div>
+    ${dayActivityPanel}
     ${clearChip}`;
 
   container.querySelectorAll("[data-day]").forEach((btn) => {
@@ -2933,6 +3009,52 @@ function renderBillCalendar() {
       renderBills();
     });
   }
+}
+
+// --- Day activity panel ----------------------------------------------------------
+function buildDayActivityPanel(dayKey) {
+  // Lists the income and expenses recorded on the selected calendar day,
+  // with day totals. Bills due that day keep showing in the bill list below.
+  const dayTransactions = transactions
+    .filter((transaction) => getDayKey(transaction.timestamp) === dayKey)
+    .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+
+  let incomeTotal = 0;
+  let expenseTotal = 0;
+  dayTransactions.forEach((transaction) => {
+    const amount = Number(transaction.amount) || 0;
+    if (transaction.type === "Income") incomeTotal += amount;
+    else expenseTotal += amount;
+  });
+
+  let itemsHtml;
+  if (dayTransactions.length === 0) {
+    itemsHtml = `<div class="day-activity-empty">${t("noDayActivity")}</div>`;
+  } else {
+    itemsHtml = dayTransactions.map((transaction) => {
+      const isIncome = transaction.type === "Income";
+      const amount = Number(transaction.amount) || 0;
+      const title = transaction.desc || translateCategory(transaction.category);
+      return `<div class="day-activity-item">
+        <div class="day-activity-main">
+          <span class="day-activity-desc">${title}</span>
+          <span class="day-activity-sub">${translateCategory(transaction.category)}</span>
+        </div>
+        <span class="day-activity-amount ${isIncome ? "pos" : "neg"}">${isIncome ? "+" : "\u2212"}${formatCurrency(amount)}</span>
+      </div>`;
+    }).join("");
+  }
+
+  return `<div class="day-activity">
+    <div class="day-activity-head">
+      <span class="day-activity-title">${t("dayActivity")} \u00b7 ${formatDate(getStartOfDay(dayKey))}</span>
+      <span class="day-activity-totals">
+        <span class="pos">+${formatCurrency(incomeTotal)}</span>
+        <span class="neg">\u2212${formatCurrency(expenseTotal)}</span>
+      </span>
+    </div>
+    ${itemsHtml}
+  </div>`;
 }
 
 // --- Swipe actions on transactions (touch devices only) -------------------------

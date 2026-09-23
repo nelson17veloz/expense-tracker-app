@@ -1296,22 +1296,31 @@ input[type="number"] {
   font-weight: 700;
 }
 .period-toggle {
-  display: inline-flex;
+  display: flex;
   gap: 3px;
+  max-width: 100%;
   margin: 8px 0 2px;
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--panel-soft);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.period-toggle::-webkit-scrollbar {
+  display: none;
 }
 .period-toggle button {
+  flex: 0 0 auto;
   border: none;
   background: transparent;
   color: var(--muted);
   font-family: inherit;
   font-size: 12px;
   font-weight: 800;
-  padding: 7px 18px;
+  white-space: nowrap;
+  padding: 7px 14px;
   border-radius: 999px;
   cursor: pointer;
   transition: background 0.16s ease, color 0.16s ease;
@@ -1393,15 +1402,97 @@ input[type="number"] {
   background: rgba(55, 223, 244, 0.12);
   font-weight: 800;
 }
-.bill-cal-dot {
+.bill-cal-dots {
   position: absolute;
   bottom: 4px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  gap: 3px;
+}
+.bill-cal-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
   background: var(--amber);
+}
+.bill-cal-dot.income {
+  background: #28e07a;
+}
+.bill-cal-dot.expense {
+  background: #ff4f63;
+}
+
+/* Day activity panel: what was added on the selected calendar day */
+.day-activity {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-soft);
+}
+.day-activity-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.day-activity-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+}
+.day-activity-totals {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.day-activity-totals .pos,
+.day-activity-amount.pos {
+  color: #35e883;
+}
+.day-activity-totals .neg,
+.day-activity-amount.neg {
+  color: #ff6b7d;
+}
+.day-activity-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+}
+.day-activity-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.day-activity-desc {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.day-activity-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+.day-activity-amount {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.day-activity-empty {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 6px 0 2px;
 }
 .bill-cal-clear-row {
   margin-top: 8px;
