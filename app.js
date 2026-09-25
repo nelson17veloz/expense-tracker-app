@@ -45,6 +45,7 @@ let swipeOpenItem = null;
 // AUTH: Google sign-in gate state. No Firestore listener attaches until a
 // Firebase user exists; authUid is the single UID allowlisted in the rules.
 let authUid = null;
+let authEmail = null;
 let authListenersStarted = false;
 let deviceIdExpanded = false;
 let lastSyncWriteErrorAt = 0;
@@ -259,6 +260,7 @@ const translations = {
     tapToShowFull: "Tap to view the full ID and copy it",
     deviceIdCopied: "Device ID copied",
     signOut: "Sign out",
+    signedInAs: "Signed in as",
     signedOut: "Signed out",
     notSignedIn: "Not signed in",
     syncWriteError: "Couldn't save to the cloud \u2014 check your connection",
@@ -453,6 +455,7 @@ const translations = {
     tapToShowFull: "Toca para ver el ID completo y copiarlo",
     deviceIdCopied: "ID del dispositivo copiado",
     signOut: "Cerrar sesión",
+    signedInAs: "Sesión iniciada como",
     signedOut: "Sesión cerrada",
     notSignedIn: "Sin sesión iniciada",
     syncWriteError: "No se pudo guardar en la nube \u2014 revisa tu conexión",
@@ -819,12 +822,14 @@ function ensureAuthenticated() {
   firebase.auth().onAuthStateChanged((user) => {
     if (user) {
       authUid = user.uid;
+      authEmail = user.email || "";
       document.body.classList.remove("auth-locked");
       hideSignInOverlay();
       updateDeviceIdUI();
       startFirestoreListeners();
     } else {
       authUid = null;
+      authEmail = null;
       clearLockedData();
       document.body.classList.add("auth-locked");
       updateDeviceIdUI();
@@ -1062,6 +1067,40 @@ function buildDeviceIdCard() {
   anchor.after(card);
 }
 
+// AUTH: visible sign-out in the side menu, plus the signed-in email in the
+// menu header, so it's obvious which account is active and how to switch it.
+function buildSideMenuAuth() {
+  const nav = document.querySelector("#sideMenu .side-menu-nav");
+  if (nav && !document.getElementById("menuSignOutBtn")) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "menuSignOutBtn";
+    btn.className = "menu-signout-btn";
+    btn.setAttribute("data-menu-action", "signout");
+    btn.setAttribute("data-i18n", "signOut");
+    btn.textContent = t("signOut");
+    nav.appendChild(btn);
+  }
+  const headerCopy = document.querySelector("#sideMenu .side-menu-header > div");
+  if (headerCopy && !document.getElementById("menuAccountEmail")) {
+    const email = document.createElement("p");
+    email.id = "menuAccountEmail";
+    email.className = "menu-account-email";
+    headerCopy.appendChild(email);
+  }
+  updateSideMenuAuthUI();
+}
+
+function updateSideMenuAuthUI() {
+  const email = document.getElementById("menuAccountEmail");
+  if (email) {
+    email.textContent = authEmail ? `${t("signedInAs")}: ${authEmail}` : "";
+    email.style.display = authEmail ? "" : "none";
+  }
+  const btn = document.getElementById("menuSignOutBtn");
+  if (btn) btn.style.display = authUid ? "" : "none";
+}
+
 function updateDeviceIdUI() {
   const value = document.getElementById("deviceIdValue");
   if (value) value.textContent = authUid ? (deviceIdExpanded ? authUid : truncateUid(authUid)) : t("notSignedIn");
@@ -1069,6 +1108,7 @@ function updateDeviceIdUI() {
   if (btn) btn.title = t("tapToShowFull");
   const signOutBtn = document.getElementById("signOutBtn");
   if (signOutBtn) signOutBtn.style.display = authUid ? "" : "none";
+  updateSideMenuAuthUI();
   // Keep the sync badge tooltip in sync (setSyncBadge also appends it).
   const syncBadge = document.getElementById("syncBadge");
   if (syncBadge && authUid) syncBadge.title = `${t("tapToRefresh")}\n${t("deviceId")}: ${authUid}`;
@@ -1142,6 +1182,7 @@ function translateStaticText() {
   setPlaceholders();
   updateConnectionBadge();
   setSyncBadge(navigator.onLine ? "ready" : "cached");
+  updateSideMenuAuthUI();
 }
 
 function formatMoney(value) {
@@ -3416,6 +3457,12 @@ function setupSideMenu() {
     if (action === "language") {
       toggleLanguage();
       closeSideMenu();
+      return;
+    }
+
+    if (action === "signout") {
+      closeSideMenu();
+      signOut();
     }
   });
 
@@ -3442,6 +3489,7 @@ document.addEventListener("DOMContentLoaded", () => {
   buildPeriodToggle();
   setupTransactionSwipe();
   buildDeviceIdCard(); // AUTH: device ID card for security rules
+  buildSideMenuAuth(); // AUTH: sign-out button + account email in side menu
   updateDeviceIdUI();
   stripHardcodedCurrencySymbols();
 
@@ -3499,6 +3547,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const action = button.dataset.menuAction;
       if (action === "theme") toggleTheme();
       if (action === "language") toggleLanguage();
+      if (action === "signout") signOut();
       closeSideMenu();
     });
   });
