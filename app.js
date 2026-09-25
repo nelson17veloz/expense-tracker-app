@@ -775,6 +775,34 @@ function addCustomCategory() {
   updateUI();
 }
 
+// SYNC: force a fresh round-trip to Firestore. Tapping the sync badge or
+// returning to the app after a long background stretch calls this, so a
+// stale connection can't leave the device showing old data for minutes.
+// Pending writes are kept queued by the SDK and flushed on reconnect.
+let forceSyncInFlight = false;
+function forceFreshSync() {
+  if (forceSyncInFlight || !authUid || !navigator.onLine) return;
+  forceSyncInFlight = true;
+  setSyncBadge("syncing");
+  db.disableNetwork()
+    .then(() => db.enableNetwork())
+    .catch(() => {})
+    .finally(() => { forceSyncInFlight = false; });
+  // Safety: release the guard if the round-trip hangs, so a later tap retries.
+  setTimeout(() => { forceSyncInFlight = false; }, 15000);
+}
+
+let appHiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    appHiddenAt = Date.now();
+  } else if (authUid && navigator.onLine && Date.now() - appHiddenAt > 30000) {
+    // App was away a while: the live connection may be stale. Refresh now
+    // instead of waiting on the SDK's slower recovery.
+    forceFreshSync();
+  }
+});
+
 function setSyncBadge(mode) {
   const syncBadge = document.getElementById("syncBadge");
   if (!syncBadge) return;
@@ -3573,9 +3601,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.getElementById("syncBadge")?.addEventListener("click", () => {
-    // UI: tappable badge forces a full re-render.
-    updateUI();
-    showToast(t("upToDate"));
+    // UI: tappable badge forces a fresh pull from Firestore.
+    forceFreshSync();
+    showToast(t("syncing"));
   });
 
   translateStaticText();
