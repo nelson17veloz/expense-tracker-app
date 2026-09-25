@@ -830,6 +830,7 @@ function ensureAuthenticated() {
     } else {
       authUid = null;
       authEmail = null;
+      authListenersStarted = false; // AUTH FIX: re-attach listeners on next sign-in
       clearLockedData();
       document.body.classList.add("auth-locked");
       updateDeviceIdUI();
