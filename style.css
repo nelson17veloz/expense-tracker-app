@@ -419,6 +419,13 @@ body[data-theme="light"] .side-menu {
   background: rgba(255, 110, 110, 0.12);
 }
 
+.menu-app-version {
+  margin: 10px 0 0;
+  font-size: 11px;
+  opacity: 0.45;
+  text-align: center;
+}
+
 .menu-account-email {
   margin: 6px 0 0;
   font-size: 11px;
