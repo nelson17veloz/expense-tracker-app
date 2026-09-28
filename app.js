@@ -16,7 +16,7 @@ try {
 
 // APP VERSION: shown at the bottom of the side menu so we can tell
 // exactly which code a device is running. Bump on every shipped change.
-const APP_VERSION = "v19";
+const APP_VERSION = "v20";
 
 let transactions = [];
 let bills = [];
@@ -247,6 +247,8 @@ const translations = {
     currency: "Currency",
     upToDate: "Everything is up to date",
     tapToRefresh: "Tap to refresh",
+    lastSynced: "Last synced",
+    justNow: "just now",
     highestIncomeDay: "Highest Income Day",
     highestExpenseDay: "Highest Expense Day",
     viewDayTransactions: "View transactions for this day",
@@ -442,6 +444,8 @@ const translations = {
     currency: "Moneda",
     upToDate: "Todo está actualizado",
     tapToRefresh: "Toca para actualizar",
+    lastSynced: "Última sincronización",
+    justNow: "ahora mismo",
     highestIncomeDay: "Día con Mayor Ingreso",
     highestExpenseDay: "Día con Mayor Gasto",
     viewDayTransactions: "Ver los movimientos de este día",
@@ -587,7 +591,7 @@ function loadCategoriesSync() {
         customCategories = merged;
         saveCategories();
         populateCategorySelects();
-        updateUI();
+        scheduleUIRefresh(); // SYNC PERF (v20): collapse snapshot bursts into one render
       }
     },
     (error) => {
@@ -784,6 +788,33 @@ function addCustomCategory() {
 // stale connection can't leave the device showing old data for minutes.
 // Pending writes are kept queued by the SDK and flushed on reconnect.
 let forceSyncInFlight = false;
+// SYNC PERF (v20): when the server last delivered fresh transactions.
+let lastServerSnapshotAt = 0;
+// SYNC PERF (v20): watchdog — if the badge sits on "syncing" too long the
+// connection is wedged, so cycle the network once to force a reconnect.
+let syncWatchdog = null;
+let syncWatchdogFired = false;
+function armSyncWatchdog() {
+  clearTimeout(syncWatchdog);
+  if (syncWatchdogFired) return; // one rescue nudge per stuck episode
+  syncWatchdog = setTimeout(() => {
+    syncWatchdogFired = true;
+    if (navigator.onLine) {
+      db.disableNetwork().then(() => db.enableNetwork()).catch(() => {});
+    }
+  }, 20000);
+}
+function clearSyncWatchdog() {
+  clearTimeout(syncWatchdog);
+  syncWatchdog = null;
+}
+// SYNC PERF (v20): collapse the burst of snapshot callbacks on startup
+// into a single re-render instead of janking through five of them.
+let uiRefreshTimer = null;
+function scheduleUIRefresh() {
+  clearTimeout(uiRefreshTimer);
+  uiRefreshTimer = setTimeout(() => { updateUI(); }, 150);
+}
 function forceFreshSync() {
   if (forceSyncInFlight || !authUid || !navigator.onLine) return;
   forceSyncInFlight = true;
@@ -801,9 +832,12 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     appHiddenAt = Date.now();
   } else if (authUid && navigator.onLine && Date.now() - appHiddenAt > 30000) {
-    // App was away a while: the live connection may be stale. Refresh now
-    // instead of waiting on the SDK's slower recovery.
-    forceFreshSync();
+    // SYNC PERF (v20): only cycle the connection when the data is actually
+    // stale. The old code reconnected on every return from background,
+    // forcing a full re-handshake each time and making sync feel slow.
+    if (Date.now() - lastServerSnapshotAt > 120000) {
+      forceFreshSync();
+    }
   }
 });
 
@@ -818,10 +852,18 @@ function setSyncBadge(mode) {
 
   if (mode === "syncing") {
     syncBadge.textContent = t("syncing");
+    armSyncWatchdog(); // SYNC PERF (v20): rescue a wedged connection once
   } else if (mode === "cached") {
     syncBadge.textContent = t("cachedMode");
+    clearSyncWatchdog();
   } else {
     syncBadge.textContent = t("ready");
+    clearSyncWatchdog();
+  }
+  // SYNC PERF (v20): show how fresh the data is, so "ready" is checkable.
+  if (lastServerSnapshotAt) {
+    const mins = Math.round((Date.now() - lastServerSnapshotAt) / 60000);
+    syncBadge.title += `\n${t("lastSynced")}: ${mins < 1 ? t("justNow") : mins + "m"}`;
   }
 }
 
@@ -1366,10 +1408,14 @@ async function loadTransactions() {
       cacheTransactionsLocally();
       populateCategorySelects();
 
-      await processRecurringTransactions();
-
       setSyncBadge(navigator.onLine ? "ready" : "cached");
-      updateUI();
+      lastServerSnapshotAt = Date.now();
+      syncWatchdogFired = false; // server answered: connection is healthy
+      scheduleUIRefresh();
+      // SYNC PERF (v20): recurring catch-up used to block this callback —
+      // and the "ready" badge — behind N sequential writes. It now runs
+      // after the UI is already fresh, as one batched write.
+      setTimeout(() => { processRecurringTransactions(); }, 0);
     },
     (error) => {
       console.error("Error loading transactions:", error);
@@ -2341,7 +2387,7 @@ function loadBills() {
       snapshot.forEach((doc) => bills.push(normalizeBill(doc.id, doc.data())));
       cacheBillsLocally();
       renderBills();
-      updateUI();
+      scheduleUIRefresh(); // SYNC PERF (v20): collapse snapshot bursts into one render
     },
     (error) => {
       console.error("Error loading bills:", error);
@@ -2604,12 +2650,18 @@ async function processRecurringTransactions() {
       }
     });
 
-    for (const item of batchAdds) {
-      // SYNC FIX: deterministic doc ID (template + date) so two devices
-      // generating the same occurrence converge on one doc instead of
-      // creating duplicates. Never deletes user data.
-      const deterministicId = `${item.generatedFromBaseId}_${item.generatedForDate}`;
-      await db.collection("transactions").doc(deterministicId).set(item);
+    // SYNC PERF (v20): one batched commit instead of N sequential
+    // round-trips — much faster on mobile connections.
+    if (batchAdds.length > 0) {
+      const batch = db.batch();
+      for (const item of batchAdds) {
+        // SYNC FIX: deterministic doc ID (template + date) so two devices
+        // generating the same occurrence converge on one doc instead of
+        // creating duplicates. Never deletes user data.
+        const deterministicId = `${item.generatedFromBaseId}_${item.generatedForDate}`;
+        batch.set(db.collection("transactions").doc(deterministicId), item);
+      }
+      await batch.commit();
     }
   } catch (error) {
     reportSyncWriteError(error, "recurring transactions");
