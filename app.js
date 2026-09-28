@@ -16,7 +16,7 @@ try {
 
 // APP VERSION: shown at the bottom of the side menu so we can tell
 // exactly which code a device is running. Bump on every shipped change.
-const APP_VERSION = "v18";
+const APP_VERSION = "v19";
 
 let transactions = [];
 let bills = [];
@@ -31,9 +31,8 @@ let currentLanguage = localStorage.getItem("language") || "en";
 let recurringProcessing = false;
 let transactionListExpanded = false;
 
-// AUTH: lock all app info behind Google sign-in. The app shell stays
-// hidden until Firebase Auth reports a signed-in user.
-if (document.body) document.body.classList.add("auth-locked");
+// AUTH (v19): no sign-in screen. The app signs in to Firebase anonymously
+// and invisibly on launch; there is no gate and no locked state.
 
 // UI: state for the UI improvements (period toggle, currency, bill calendar,
 // transaction list date filter, swipe). heroPeriod is a per-device preference.
@@ -46,8 +45,9 @@ let billCalendarMonth = getCurrentMonthValue();
 let billCalendarSelectedDay = null;
 let swipeOpenItem = null;
 
-// AUTH: Google sign-in gate state. No Firestore listener attaches until a
-// Firebase user exists; authUid is the single UID allowlisted in the rules.
+// AUTH (v19): anonymous session state. No Firestore listener attaches until
+// Firebase Auth reports a user; the anonymous sign-in is silent and
+// automatic. authEmail is unused — anonymous sessions have no email.
 let authUid = null;
 let authEmail = null;
 let authListenersStarted = false;
@@ -260,7 +260,7 @@ const translations = {
     enableGoogleProvider: "Enable Google sign-in in Firebase Console \u2192 Authentication \u2192 Sign-in method, then try again.",
     unauthorizedDomain: "This site\u2019s domain isn\u2019t authorized for sign-in. Add it in Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
     deviceId: "Device ID",
-    deviceIdHint: "This is the ID to paste into your Firestore security rules.",
+    deviceIdHint: "Anonymous sync ID for this device.",
     tapToShowFull: "Tap to view the full ID and copy it",
     deviceIdCopied: "Device ID copied",
     signOut: "Sign out",
@@ -455,7 +455,7 @@ const translations = {
     enableGoogleProvider: "Activa el inicio de sesión con Google en Firebase Console \u2192 Authentication \u2192 Sign-in method e inténtalo de nuevo.",
     unauthorizedDomain: "El dominio de este sitio no est\u00e1 autorizado para iniciar sesi\u00f3n. Agr\u00e9galo en Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
     deviceId: "ID del dispositivo",
-    deviceIdHint: "Este es el ID que debes pegar en tus reglas de seguridad de Firestore.",
+    deviceIdHint: "ID de sincronización anónima de este dispositivo.",
     tapToShowFull: "Toca para ver el ID completo y copiarlo",
     deviceIdCopied: "ID del dispositivo copiado",
     signOut: "Cerrar sesión",
@@ -839,40 +839,33 @@ function updateConnectionBadge() {
 }
 
 // ============================================================
-// AUTH: Google sign-in gate. Every Firestore listener and every
-// Firestore write below only runs after Firebase Auth reports a
-// signed-in user. The Google session persists across reloads via
-// Firebase's default persistence, so sign-in is a one-time step per
-// device and the same UID works everywhere.
+// AUTH (v19): no sign-in screen. Every Firestore listener and every
+// Firestore write below only runs after Firebase Auth reports a user.
+// The app signs in anonymously and invisibly on launch; the anonymous
+// session persists across reloads via Firebase's default persistence,
+// so this is a one-time silent step per device/browser profile.
 // ============================================================
 function ensureAuthenticated() {
-  // Handle the return leg of a redirect-based sign-in, if one happened.
-  firebase.auth().getRedirectResult().catch((error) => {
-    console.error("Redirect sign-in error:", error);
-    showToast(t("signInError"));
-  });
   firebase.auth().onAuthStateChanged((user) => {
     if (user) {
       authUid = user.uid;
-      authEmail = user.email || "";
-      document.body.classList.remove("auth-locked");
-      hideSignInOverlay();
+      authEmail = "";
       updateDeviceIdUI();
       startFirestoreListeners();
     } else {
-      authUid = null;
-      authEmail = null;
-      authListenersStarted = false; // AUTH FIX: re-attach listeners on next sign-in
-      clearLockedData();
-      document.body.classList.add("auth-locked");
-      updateDeviceIdUI();
-      showSignInOverlay();
+      // No session yet: sign in anonymously (invisible, no UI).
+      // Requires the Anonymous provider enabled in the Firebase console.
+      firebase.auth().signInAnonymously().catch((error) => {
+        console.error("Anonymous sign-in failed:", error);
+        showToast(t("signInError"));
+        setSyncBadge("cached");
+      });
     }
   });
 }
 
 function startFirestoreListeners() {
-  // AUTH: single gate — nothing here runs before a user exists.
+  // AUTH (v19): single gate — nothing here runs before anonymous sign-in completes.
   if (authListenersStarted) return;
   authListenersStarted = true;
   loadCachedTransactions();
@@ -882,149 +875,6 @@ function startFirestoreListeners() {
   loadBudgets();
   loadCategoriesSync();
   loadCurrencySync();
-}
-
-// AUTH: wipe rendered data when the session ends so no info lingers
-// behind the sign-in gate.
-function clearLockedData() {
-  transactions = [];
-  bills = [];
-  const list = document.getElementById("list");
-  if (list) list.innerHTML = "";
-  const billsList = document.getElementById("billsList");
-  if (billsList) billsList.innerHTML = "";
-}
-
-async function signInWithGoogle() {
-  try {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    await firebase.auth().signInWithPopup(provider);
-    // Success is handled by the onAuthStateChanged listener.
-  } catch (error) {
-    if (error && (error.code === "auth/popup-blocked" || error.code === "auth/popup-closed-by-user")) {
-      // Popups blocked (common in embedded webviews): fall back to a
-      // full-page redirect; getRedirectResult() on the next boot completes it.
-      try {
-        await firebase.auth().signInWithRedirect(provider);
-      } catch (redirectError) {
-        handleSignInError(redirectError);
-      }
-    } else {
-      handleSignInError(error);
-    }
-  }
-}
-
-function handleSignInError(error) {
-  console.error("Google sign-in failed:", error);
-  if (error && error.code === "auth/operation-not-allowed") {
-    showToast(t("enableGoogleProvider"));
-  } else if (error && error.code === "auth/unauthorized-domain") {
-    showToast(t("unauthorizedDomain"));
-  } else {
-    showToast(t("signInError"));
-  }
-  setSyncBadge("cached");
-}
-
-function signOut() {
-  firebase.auth().signOut().then(() => {
-    showToast(t("signedOut"));
-    // onAuthStateChanged(null) brings the sign-in overlay back.
-  }).catch((error) => {
-    console.error("Sign-out failed:", error);
-    showToast(t("signInError"));
-  });
-}
-
-function showSignInOverlay() {
-  let overlay = document.getElementById("authOverlay");
-  if (overlay) {
-    overlay.classList.remove("hidden");
-    return;
-  }
-  overlay = document.createElement("div");
-  overlay.id = "authOverlay";
-  overlay.className = "auth-overlay";
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-
-  const card = document.createElement("div");
-  card.className = "auth-card";
-
-  const brand = document.createElement("div");
-  brand.className = "auth-brand";
-  const logo = document.createElement("img");
-  logo.className = "auth-logo-img";
-  logo.src = "Logo.PNG";
-  logo.alt = "Expense Tracker logo";
-  const eyebrow = document.createElement("p");
-  eyebrow.className = "auth-eyebrow";
-  eyebrow.setAttribute("data-i18n", "eyebrow");
-  eyebrow.textContent = t("eyebrow");
-  brand.appendChild(logo);
-  brand.appendChild(eyebrow);
-
-  const title = document.createElement("h2");
-  title.className = "auth-title";
-  title.setAttribute("data-i18n", "appTitle");
-  title.textContent = t("appTitle");
-
-  const sub = document.createElement("p");
-  sub.className = "auth-sub";
-  sub.setAttribute("data-i18n", "signInSubtext");
-  sub.textContent = t("signInSubtext");
-
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.id = "googleSignInBtn";
-  btn.className = "auth-google-btn";
-  const g = document.createElement("span");
-  g.className = "auth-google-g";
-  g.setAttribute("aria-hidden", "true");
-  g.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"/></svg>';
-  const label = document.createElement("span");
-  label.setAttribute("data-i18n", "signInWithGoogle");
-  label.textContent = t("signInWithGoogle");
-  btn.appendChild(g);
-  btn.appendChild(label);
-  btn.addEventListener("click", signInWithGoogle);
-
-  const features = document.createElement("ul");
-  features.className = "auth-features";
-  ["authFeature1", "authFeature2", "authFeature3"].forEach((key) => {
-    const li = document.createElement("li");
-    const check = document.createElement("span");
-    check.className = "auth-check";
-    check.setAttribute("aria-hidden", "true");
-    check.textContent = "\u2713";
-    const text = document.createElement("span");
-    text.setAttribute("data-i18n", key);
-    text.textContent = t(key);
-    li.appendChild(check);
-    li.appendChild(text);
-    features.appendChild(li);
-  });
-
-  const secure = document.createElement("p");
-  secure.className = "auth-secure-note";
-  const secureText = document.createElement("span");
-  secureText.setAttribute("data-i18n", "authSecureNote");
-  secureText.textContent = t("authSecureNote");
-  secure.appendChild(secureText);
-
-  card.appendChild(brand);
-  card.appendChild(title);
-  card.appendChild(sub);
-  card.appendChild(btn);
-  card.appendChild(features);
-  card.appendChild(secure);
-  overlay.appendChild(card);
-  document.body.prepend(overlay);
-}
-
-function hideSignInOverlay() {
-  document.getElementById("authOverlay")?.classList.add("hidden");
 }
 
 // AUTH: surface background sync-write failures (budgets / categories /
@@ -1043,9 +893,9 @@ function truncateUid(uid) {
   return `${uid.slice(0, 6)}\u2026${uid.slice(-4)}`;
 }
 
-// AUTH: device-ID card at the bottom of the Insights tab. Shows the signed-in
-// Google UID (truncated); tapping reveals the full UID and copies it for the
-// rules page. Includes a sign-out button.
+// AUTH (v19): device-ID card at the bottom of the Insights tab. Shows the
+// anonymous sync UID (truncated); tapping reveals the full UID and copies it.
+// No sign-out — the anonymous session persists on the device.
 function buildDeviceIdCard() {
   const anchor = document.getElementById("categoryTotalsList")?.closest("section");
   if (!anchor || document.getElementById("deviceIdCard")) return;
@@ -1081,15 +931,7 @@ function buildDeviceIdCard() {
       showToast(authUid);
     }
   });
-  const signOutBtn = document.createElement("button");
-  signOutBtn.type = "button";
-  signOutBtn.id = "signOutBtn";
-  signOutBtn.className = "device-id-signout";
-  signOutBtn.setAttribute("data-i18n", "signOut");
-  signOutBtn.textContent = t("signOut");
-  signOutBtn.addEventListener("click", signOut);
   row.appendChild(btn);
-  row.appendChild(signOutBtn);
   const hint = document.createElement("p");
   hint.className = "device-id-hint";
   hint.setAttribute("data-i18n", "deviceIdHint");
@@ -1100,43 +942,21 @@ function buildDeviceIdCard() {
   anchor.after(card);
 }
 
-// AUTH: visible sign-out in the side menu, plus the signed-in email in the
-// menu header, so it's obvious which account is active and how to switch it.
+// AUTH (v19): no sign-in UI anymore. The side menu only shows the app
+// version label at the bottom.
 function buildSideMenuAuth() {
   const nav = document.querySelector("#sideMenu .side-menu-nav");
-  if (nav && !document.getElementById("menuSignOutBtn")) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.id = "menuSignOutBtn";
-    btn.className = "menu-signout-btn";
-    btn.setAttribute("data-menu-action", "signout");
-    btn.setAttribute("data-i18n", "signOut");
-    btn.textContent = t("signOut");
-    nav.appendChild(btn);
+  if (nav && !document.getElementById("menuAppVersion")) {
     const ver = document.createElement("p");
     ver.id = "menuAppVersion";
     ver.className = "menu-app-version";
     ver.textContent = APP_VERSION;
     nav.appendChild(ver);
   }
-  const headerCopy = document.querySelector("#sideMenu .side-menu-header > div");
-  if (headerCopy && !document.getElementById("menuAccountEmail")) {
-    const email = document.createElement("p");
-    email.id = "menuAccountEmail";
-    email.className = "menu-account-email";
-    headerCopy.appendChild(email);
-  }
-  updateSideMenuAuthUI();
 }
 
 function updateSideMenuAuthUI() {
-  const email = document.getElementById("menuAccountEmail");
-  if (email) {
-    email.textContent = authEmail ? `${t("signedInAs")}: ${authEmail}` : "";
-    email.style.display = authEmail ? "" : "none";
-  }
-  const btn = document.getElementById("menuSignOutBtn");
-  if (btn) btn.style.display = authUid ? "" : "none";
+  // v19: no account UI to update.
 }
 
 function updateDeviceIdUI() {
@@ -1144,8 +964,6 @@ function updateDeviceIdUI() {
   if (value) value.textContent = authUid ? (deviceIdExpanded ? authUid : truncateUid(authUid)) : t("notSignedIn");
   const btn = document.getElementById("deviceIdBtn");
   if (btn) btn.title = t("tapToShowFull");
-  const signOutBtn = document.getElementById("signOutBtn");
-  if (signOutBtn) signOutBtn.style.display = authUid ? "" : "none";
   updateSideMenuAuthUI();
   // Keep the sync badge tooltip in sync (setSyncBadge also appends it).
   const syncBadge = document.getElementById("syncBadge");
@@ -3497,11 +3315,6 @@ function setupSideMenu() {
       closeSideMenu();
       return;
     }
-
-    if (action === "signout") {
-      closeSideMenu();
-      signOut();
-    }
   });
 
   document.addEventListener("keydown", (event) => {
@@ -3526,13 +3339,13 @@ document.addEventListener("DOMContentLoaded", () => {
   buildCurrencySelect();
   buildPeriodToggle();
   setupTransactionSwipe();
-  buildDeviceIdCard(); // AUTH: device ID card for security rules
-  buildSideMenuAuth(); // AUTH: sign-out button + account email in side menu
+  buildDeviceIdCard(); // AUTH (v19): device ID card shows the anonymous sync UID
+  buildSideMenuAuth(); // AUTH (v19): version label in side menu
   updateDeviceIdUI();
   stripHardcodedCurrencySymbols();
 
   populateCategorySelects();
-  // AUTH: cached data loads only after sign-in (inside startFirestoreListeners).
+  // AUTH (v19): cached data loads after anonymous sign-in (inside startFirestoreListeners).
   registerServiceWorker();
 
   document.getElementById("monthPicker")?.addEventListener("change", () => {
@@ -3585,7 +3398,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const action = button.dataset.menuAction;
       if (action === "theme") toggleTheme();
       if (action === "language") toggleLanguage();
-      if (action === "signout") signOut();
       closeSideMenu();
     });
   });
@@ -3618,11 +3430,9 @@ document.addEventListener("DOMContentLoaded", () => {
   translateStaticText();
   populateCategorySelects();
   try {
-    ensureAuthenticated(); // AUTH: listeners attach only after Google sign-in
+    ensureAuthenticated(); // AUTH (v19): silent anonymous sign-in, then listeners attach
   } catch (error) {
     console.error("Auth init failed:", error);
-    document.body.classList.add("auth-locked");
-    showSignInOverlay();
     showToast(t("signInError"));
   }
-});
+});
