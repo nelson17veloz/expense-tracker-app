@@ -16,7 +16,7 @@ try {
 
 // APP VERSION: shown at the bottom of the side menu so we can tell
 // exactly which code a device is running. Bump on every shipped change.
-const APP_VERSION = "v20";
+const APP_VERSION = "v21";
 
 let transactions = [];
 let bills = [];
@@ -31,8 +31,10 @@ let currentLanguage = localStorage.getItem("language") || "en";
 let recurringProcessing = false;
 let transactionListExpanded = false;
 
-// AUTH (v19): no sign-in screen. The app signs in to Firebase anonymously
-// and invisibly on launch; there is no gate and no locked state.
+// AUTH (v21): Google sign-in. Every person signs in with their Google account
+// and gets a private dataset; security rules enforce that a user can only
+// touch their own subtree. Multiple people may share one Google account —
+// whoever signs in with the same email sees the same private data.
 
 // UI: state for the UI improvements (period toggle, currency, bill calendar,
 // transaction list date filter, swipe). heroPeriod is a per-device preference.
@@ -45,18 +47,67 @@ let billCalendarMonth = getCurrentMonthValue();
 let billCalendarSelectedDay = null;
 let swipeOpenItem = null;
 
-// AUTH (v19): anonymous session state. No Firestore listener attaches until
-// Firebase Auth reports a user; the anonymous sign-in is silent and
-// automatic. authEmail is unused — anonymous sessions have no email.
+// AUTH (v21): Google session state. No Firestore listener attaches until
+// Firebase Auth reports a Google (non-anonymous) user. authEmail is shown in
+// the side menu and the account card.
 let authUid = null;
 let authEmail = null;
 let authListenersStarted = false;
-let deviceIdExpanded = false;
 let lastSyncWriteErrorAt = 0;
 
 const LOCAL_TRANSACTIONS_KEY = "expense_tracker_cached_transactions_v2";
 const LOCAL_BILLS_KEY = "expense_tracker_cached_bills_v1";
 const CUSTOM_CATEGORIES_KEY = "expense_tracker_categories_v2";
+const LEGACY_BUDGETS_KEY = "budgets";
+
+// AUTH (v21): per-user offline caches. Device-level preferences (theme,
+// language, hero period) stay shared; user-data caches are namespaced by UID
+// so two Google accounts on one device never read each other's cached data.
+// v19/v20 wrote these keys without a UID — seedUserCacheFromLegacy() adopts
+// them into the first signed-in user's namespace once, then drops them.
+function userCacheKey(base) {
+  return authUid ? `${base}__uid_${authUid}` : base;
+}
+function readJsonCache(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+function seedUserCacheFromLegacy() {
+  if (!authUid || localStorage.getItem("__et_migrated_cache_v21")) return;
+  const pairs = [
+    [LEGACY_BUDGETS_KEY, userCacheKey(LEGACY_BUDGETS_KEY)],
+    [CUSTOM_CATEGORIES_KEY, userCacheKey(CUSTOM_CATEGORIES_KEY)],
+    [CURRENCY_KEY, userCacheKey(CURRENCY_KEY)],
+    [LOCAL_TRANSACTIONS_KEY, userCacheKey(LOCAL_TRANSACTIONS_KEY)],
+    [LOCAL_BILLS_KEY, userCacheKey(LOCAL_BILLS_KEY)],
+  ];
+  pairs.forEach(([from, to]) => {
+    try {
+      const raw = localStorage.getItem(from);
+      if (raw !== null && localStorage.getItem(to) === null) {
+        localStorage.setItem(to, raw);
+      }
+      localStorage.removeItem(from);
+    } catch (_) {}
+  });
+  try {
+    localStorage.setItem("__et_migrated_cache_v21", "1");
+  } catch (_) {}
+}
+function loadUserCaches() {
+  // AUTH (v21): refresh in-memory state from this user's cache namespace so
+  // a previous account's leftovers never render for the current user.
+  seedUserCacheFromLegacy();
+  budgets = readJsonCache(userCacheKey(LEGACY_BUDGETS_KEY), {});
+  const cats = readJsonCache(userCacheKey(CUSTOM_CATEGORIES_KEY), null);
+  customCategories = Array.isArray(cats) && cats.length ? cats : [...DEFAULT_CATEGORIES];
+  const cur = localStorage.getItem(userCacheKey(CURRENCY_KEY));
+  if (cur && SUPPORTED_CURRENCIES.includes(cur)) appCurrency = cur;
+}
 
 const DEFAULT_CATEGORIES = [
   "Bills",
@@ -270,6 +321,12 @@ const translations = {
     signedOut: "Signed out",
     notSignedIn: "Not signed in",
     syncWriteError: "Couldn't save to the cloud \u2014 check your connection",
+    migrationTitle: "Import your existing data",
+    migrationBody: "Found expenses saved under the old shared setup. Import them into your private account?",
+    migrationImport: "Import existing data",
+    migrationLater: "Later",
+    migrationDone: "Data imported to your account",
+    migrationFailed: "Import failed \u2014 check your connection and try again",
   },
   es: {
     eyebrow: "Finanzas Personales",
@@ -467,6 +524,12 @@ const translations = {
     signedOut: "Sesión cerrada",
     notSignedIn: "Sin sesión iniciada",
     syncWriteError: "No se pudo guardar en la nube \u2014 revisa tu conexión",
+    migrationTitle: "Importar tus datos existentes",
+    migrationBody: "Encontramos gastos guardados en el sistema compartido anterior. ¿Importarlos a tu cuenta privada?",
+    migrationImport: "Importar datos existentes",
+    migrationLater: "Más tarde",
+    migrationDone: "Datos importados a tu cuenta",
+    migrationFailed: "La importación falló \u2014 revisa tu conexión e inténtalo de nuevo",
   }
 };
 
@@ -504,7 +567,7 @@ function normalizeOtherLabel(category) {
 
 function loadCategories() {
   try {
-    const raw = localStorage.getItem(CUSTOM_CATEGORIES_KEY);
+    const raw = localStorage.getItem(userCacheKey(CUSTOM_CATEGORIES_KEY));
     const parsed = raw ? JSON.parse(raw) : [];
     const incoming = Array.isArray(parsed) ? parsed : [];
     const merged = [...DEFAULT_CATEGORIES];
@@ -523,14 +586,16 @@ function loadCategories() {
 }
 
 function saveCategories() {
-  localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(customCategories));
+  localStorage.setItem(userCacheKey(CUSTOM_CATEGORIES_KEY), JSON.stringify(customCategories));
 }
 
 // ---------------------------------------------------------------------------
-// SYNC FIX (A + B): cross-device settings sync.
+// AUTH (v21): per-user private data. Every Firestore path lives under
+// users/{uid}; the security rules guarantee a Google user can only read and
+// write their own subtree. Refs are bound after Google sign-in via
+// bindUserRefs() — never touch them before authUid is set.
 //
-// Budgets and custom categories used to live only in localStorage, so every
-// device had its own copy. They are now mirrored to Firestore under a shared
+// Budgets and custom categories are mirrored to Firestore under the user's
 // "appmeta" collection. localStorage remains as the offline cache / boot
 // fallback; Firestore is the source of truth once its snapshot arrives.
 //
@@ -539,14 +604,32 @@ function saveCategories() {
 //  - Firestore writes happen only on explicit user actions (or when the
 //    transaction listener auto-adds a genuinely new category).
 // ---------------------------------------------------------------------------
-const appmetaRef = db.collection("appmeta");
-const budgetsDocRef = appmetaRef.doc("budgets");
-const categoriesDocRef = appmetaRef.doc("categories");
-const settingsDocRef = appmetaRef.doc("settings"); // UI: currency sync doc
+function userDoc() {
+  return db.collection("users").doc(authUid);
+}
+function transactionsCol() {
+  return userDoc().collection("transactions");
+}
+function billsCol() {
+  return userDoc().collection("bills");
+}
+function appmetaCol() {
+  return userDoc().collection("appmeta");
+}
+let appmetaRef = null;
+let budgetsDocRef = null;
+let categoriesDocRef = null;
+let settingsDocRef = null; // UI: currency sync doc
+function bindUserRefs() {
+  appmetaRef = appmetaCol();
+  budgetsDocRef = appmetaRef.doc("budgets");
+  categoriesDocRef = appmetaRef.doc("categories");
+  settingsDocRef = appmetaRef.doc("settings");
+}
 
 function persistBudgets() {
   // SYNC FIX: write budgets to the localStorage cache AND Firestore.
-  localStorage.setItem("budgets", JSON.stringify(budgets));
+  localStorage.setItem(userCacheKey(LEGACY_BUDGETS_KEY), JSON.stringify(budgets));
   budgetsDocRef.set({ values: budgets }, { merge: true }).catch((error) => reportSyncWriteError(error, "budgets"));
 }
 
@@ -557,7 +640,7 @@ function loadBudgets() {
       const data = doc.exists ? doc.data() : null;
       if (data && data.values && typeof data.values === "object") {
         budgets = data.values;
-        localStorage.setItem("budgets", JSON.stringify(budgets));
+        localStorage.setItem(userCacheKey(LEGACY_BUDGETS_KEY), JSON.stringify(budgets));
         renderBudgetList();
         updateInsights();
       }
@@ -881,33 +964,174 @@ function updateConnectionBadge() {
 }
 
 // ============================================================
-// AUTH (v19): no sign-in screen. Every Firestore listener and every
-// Firestore write below only runs after Firebase Auth reports a user.
-// The app signs in anonymously and invisibly on launch; the anonymous
-// session persists across reloads via Firebase's default persistence,
-// so this is a one-time silent step per device/browser profile.
+// AUTH (v21): Google sign-in. Every Firestore listener and every
+// Firestore write below only runs after Firebase Auth reports a Google
+// (non-anonymous) user. The login overlay gates the whole app until then.
+// Redirect (not popup) is used because it works reliably on mobile browsers.
 // ============================================================
 function ensureAuthenticated() {
+  // Surface redirect-result errors (e.g. Google provider not enabled in the
+  // Firebase console, or the domain not authorized).
+  firebase.auth().getRedirectResult().catch((error) => {
+    console.error("Google sign-in failed:", error);
+    if (error && error.code === "auth/operation-not-allowed") showToast(t("enableGoogleProvider"));
+    else if (error && error.code === "auth/unauthorized-domain") showToast(t("unauthorizedDomain"));
+    else showToast(t("signInError"));
+  });
+
   firebase.auth().onAuthStateChanged((user) => {
-    if (user) {
+    if (user && !user.isAnonymous) {
       authUid = user.uid;
-      authEmail = "";
+      authEmail = user.email || "";
+      bindUserRefs();
+      loadUserCaches();
+      hideLoginScreen();
       updateDeviceIdUI();
+      updateSideMenuAuthUI();
       startFirestoreListeners();
+      maybeOfferMigration();
     } else {
-      // No session yet: sign in anonymously (invisible, no UI).
-      // Requires the Anonymous provider enabled in the Firebase console.
-      firebase.auth().signInAnonymously().catch((error) => {
-        console.error("Anonymous sign-in failed:", error);
-        showToast(t("signInError"));
-        setSyncBadge("cached");
-      });
+      // No Google session. A stale anonymous session from v19/v20 is signed
+      // out so only Google sessions remain; the callback re-fires with null.
+      if (user && user.isAnonymous) {
+        firebase.auth().signOut().catch(() => {});
+        return;
+      }
+      authUid = null;
+      authEmail = null;
+      setSyncBadge("cached");
+      showLoginScreen();
     }
   });
 }
 
+function signInWithGoogle() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  firebase.auth().signInWithRedirect(provider).catch((error) => {
+    console.error("Google sign-in failed:", error);
+    showToast(t("signInError"));
+  });
+}
+
+function signOutAndReload() {
+  firebase.auth().signOut().catch(() => {}).finally(() => location.reload());
+}
+
+const GOOGLE_G_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.27c0-.85-.08-1.66-.22-2.45H12v4.64h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.09 3.57-5.16 3.57-8.81z"/><path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.87-3c-1.07.72-2.44 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.29v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.27 14.28A7.2 7.2 0 0 1 4.89 12c0-.79.14-1.56.38-2.28v-3.1H1.29a12 12 0 0 0 0 10.76l3.98-3.1z"/><path fill="#EA4335" d="M12 4.76c1.76 0 3.35.61 4.6 1.8l3.42-3.42A11.98 11.98 0 0 0 12 0 12 12 0 0 0 1.29 6.62l3.98 3.1C6.22 6.87 8.87 4.76 12 4.76z"/></svg>';
+
+function showLoginScreen() {
+  let overlay = document.getElementById("authOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "auth-overlay";
+    overlay.id = "authOverlay";
+    overlay.innerHTML =
+      '<div class="auth-card">' +
+        '<div class="auth-brand">' +
+          '<img class="auth-logo-img" src="./Icon.png" alt="">' +
+          '<div class="auth-eyebrow" data-i18n="eyebrow"></div>' +
+          '<div class="auth-title" data-i18n="appTitle"></div>' +
+        "</div>" +
+        '<p class="auth-sub" data-i18n="signInSubtext"></p>' +
+        '<button type="button" class="auth-google-btn" id="googleSignInBtn">' +
+          '<span class="auth-google-g">' + GOOGLE_G_SVG + "</span>" +
+          '<span data-i18n="signInWithGoogle"></span>' +
+        "</button>" +
+        '<ul class="auth-features">' +
+          '<li><span class="auth-check">\u2713</span><span data-i18n="authFeature1"></span></li>' +
+          '<li><span class="auth-check">\u2713</span><span data-i18n="authFeature2"></span></li>' +
+          '<li><span class="auth-check">\u2713</span><span data-i18n="authFeature3"></span></li>' +
+        "</ul>" +
+        '<p class="auth-secure-note" data-i18n="authSecureNote"></p>' +
+      "</div>";
+    document.body.appendChild(overlay);
+    document.getElementById("googleSignInBtn")?.addEventListener("click", signInWithGoogle);
+  }
+  overlay.classList.remove("hidden");
+  document.body.classList.add("auth-locked");
+  translateStaticText();
+}
+
+function hideLoginScreen() {
+  document.getElementById("authOverlay")?.classList.add("hidden");
+  document.body.classList.remove("auth-locked");
+}
+
+// AUTH (v21): one-tap migration of the old shared dataset (v19/v20) into the
+// signed-in user's private space. Only offered when the private space is
+// empty and legacy data exists. Run this BEFORE publishing the v21 security
+// rules — the old rules must still allow reading the legacy collections.
+function maybeOfferMigration() {
+  if (!authUid || localStorage.getItem(`__et_migration_done__${authUid}`)) return;
+  Promise.all([transactionsCol().limit(1).get(), billsCol().limit(1).get()])
+    .then(([txSnap, billsSnap]) => {
+      if (!txSnap.empty || !billsSnap.empty) return; // private space already has data
+      return db.collection("transactions").limit(1).get().then((legacySnap) => {
+        if (!legacySnap.empty) showMigrationBanner();
+      });
+    })
+    .catch(() => {}); // legacy paths unreadable (new rules already live): nothing to do
+}
+
+function showMigrationBanner() {
+  if (document.getElementById("migrationBanner")) return;
+  const banner = document.createElement("div");
+  banner.id = "migrationBanner";
+  banner.className = "migration-banner";
+  banner.innerHTML =
+    '<div class="migration-text"><strong data-i18n="migrationTitle"></strong>' +
+    '<p data-i18n="migrationBody"></p></div>' +
+    '<div class="migration-actions">' +
+    '<button type="button" class="migration-import" data-i18n="migrationImport"></button>' +
+    '<button type="button" class="migration-later" data-i18n="migrationLater"></button>' +
+    "</div>";
+  document.body.appendChild(banner);
+  translateStaticText();
+  banner.querySelector(".migration-import")?.addEventListener("click", migrateLegacyData);
+  banner.querySelector(".migration-later")?.addEventListener("click", () => {
+    banner.remove(); // asked again on next sign-in until data is imported
+  });
+}
+
+async function migrateLegacyData() {
+  const btn = document.querySelector("#migrationBanner .migration-import");
+  if (btn) btn.disabled = true;
+  showToast(t("syncing"));
+  try {
+    const batch = db.batch();
+    let count = 0;
+    const txSnap = await db.collection("transactions").get();
+    txSnap.forEach((d) => {
+      batch.set(transactionsCol().doc(d.id), d.data());
+      count++;
+    });
+    const billsSnap = await db.collection("bills").get();
+    billsSnap.forEach((d) => {
+      batch.set(billsCol().doc(d.id), d.data());
+      count++;
+    });
+    for (const name of ["budgets", "categories", "settings"]) {
+      const d = await db.collection("appmeta").doc(name).get();
+      if (d.exists) {
+        batch.set(appmetaCol().doc(name), d.data());
+        count++;
+      }
+    }
+    await batch.commit();
+    try {
+      localStorage.setItem(`__et_migration_done__${authUid}`, "done");
+    } catch (_) {}
+    document.getElementById("migrationBanner")?.remove();
+    showToast(t("migrationDone"));
+  } catch (error) {
+    console.error("Migration failed:", error);
+    if (btn) btn.disabled = false;
+    showToast(t("migrationFailed"));
+  }
+}
+
 function startFirestoreListeners() {
-  // AUTH (v19): single gate — nothing here runs before anonymous sign-in completes.
+  // AUTH (v21): single gate — nothing here runs before Google sign-in completes.
   if (authListenersStarted) return;
   authListenersStarted = true;
   loadCachedTransactions();
@@ -930,14 +1154,8 @@ function reportSyncWriteError(error, context) {
   showToast(t("syncWriteError"));
 }
 
-function truncateUid(uid) {
-  if (!uid || uid.length <= 12) return uid || "";
-  return `${uid.slice(0, 6)}\u2026${uid.slice(-4)}`;
-}
-
-// AUTH (v19): device-ID card at the bottom of the Insights tab. Shows the
-// anonymous sync UID (truncated); tapping reveals the full UID and copies it.
-// No sign-out — the anonymous session persists on the device.
+// AUTH (v21): account card at the bottom of the Insights tab. Shows the
+// signed-in Google account; tapping copies the email. Includes sign-out.
 function buildDeviceIdCard() {
   const anchor = document.getElementById("categoryTotalsList")?.closest("section");
   if (!anchor || document.getElementById("deviceIdCard")) return;
@@ -947,8 +1165,8 @@ function buildDeviceIdCard() {
   const header = document.createElement("div");
   header.className = "section-header";
   const title = document.createElement("h3");
-  title.setAttribute("data-i18n", "deviceId");
-  title.textContent = t("deviceId");
+  title.setAttribute("data-i18n", "signedInAs");
+  title.textContent = t("signedInAs");
   header.appendChild(title);
   const row = document.createElement("div");
   row.className = "device-id-row";
@@ -961,51 +1179,69 @@ function buildDeviceIdCard() {
   value.textContent = "\u2026";
   btn.appendChild(value);
   btn.addEventListener("click", () => {
-    if (!authUid) return;
-    deviceIdExpanded = !deviceIdExpanded;
-    value.textContent = deviceIdExpanded ? authUid : truncateUid(authUid);
+    if (!authEmail) return;
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(authUid).then(
-        () => showToast(t("deviceIdCopied")),
-        () => showToast(authUid)
+      navigator.clipboard.writeText(authEmail).then(
+        () => showToast(authEmail),
+        () => showToast(authEmail)
       );
     } else {
-      showToast(authUid);
+      showToast(authEmail);
     }
   });
   row.appendChild(btn);
+  const signOutBtn = document.createElement("button");
+  signOutBtn.type = "button";
+  signOutBtn.className = "device-id-signout";
+  signOutBtn.setAttribute("data-i18n", "signOut");
+  signOutBtn.textContent = t("signOut");
+  signOutBtn.addEventListener("click", signOutAndReload);
+  row.appendChild(signOutBtn);
   const hint = document.createElement("p");
   hint.className = "device-id-hint";
-  hint.setAttribute("data-i18n", "deviceIdHint");
-  hint.textContent = t("deviceIdHint");
+  hint.setAttribute("data-i18n", "authFeature2");
+  hint.textContent = t("authFeature2");
   card.appendChild(header);
   card.appendChild(row);
   card.appendChild(hint);
   anchor.after(card);
 }
 
-// AUTH (v19): no sign-in UI anymore. The side menu only shows the app
-// version label at the bottom.
+// AUTH (v21): side menu shows the signed-in Google account, a sign-out
+// button, and the app version label at the bottom.
 function buildSideMenuAuth() {
   const nav = document.querySelector("#sideMenu .side-menu-nav");
-  if (nav && !document.getElementById("menuAppVersion")) {
-    const ver = document.createElement("p");
-    ver.id = "menuAppVersion";
-    ver.className = "menu-app-version";
-    ver.textContent = APP_VERSION;
-    nav.appendChild(ver);
-  }
+  if (!nav || document.getElementById("menuAccountBlock")) return;
+  const block = document.createElement("div");
+  block.id = "menuAccountBlock";
+  block.className = "menu-account-block";
+  const email = document.createElement("p");
+  email.id = "menuAccountEmail";
+  email.className = "menu-account-email";
+  const signOutBtn = document.createElement("button");
+  signOutBtn.type = "button";
+  signOutBtn.className = "menu-signout-btn";
+  signOutBtn.setAttribute("data-i18n", "signOut");
+  signOutBtn.textContent = t("signOut");
+  signOutBtn.addEventListener("click", signOutAndReload);
+  const ver = document.createElement("p");
+  ver.id = "menuAppVersion";
+  ver.className = "menu-app-version";
+  ver.textContent = APP_VERSION;
+  block.appendChild(email);
+  block.appendChild(signOutBtn);
+  block.appendChild(ver);
+  nav.appendChild(block);
 }
 
 function updateSideMenuAuthUI() {
-  // v19: no account UI to update.
+  const email = document.getElementById("menuAccountEmail");
+  if (email) email.textContent = authEmail ? `${t("signedInAs")} ${authEmail}` : t("notSignedIn");
 }
 
 function updateDeviceIdUI() {
   const value = document.getElementById("deviceIdValue");
-  if (value) value.textContent = authUid ? (deviceIdExpanded ? authUid : truncateUid(authUid)) : t("notSignedIn");
-  const btn = document.getElementById("deviceIdBtn");
-  if (btn) btn.title = t("tapToShowFull");
+  if (value) value.textContent = authEmail || t("notSignedIn");
   updateSideMenuAuthUI();
   // Keep the sync badge tooltip in sync (setSyncBadge also appends it).
   const syncBadge = document.getElementById("syncBadge");
@@ -1114,7 +1350,7 @@ function formatCurrency(value) {
 }
 
 function persistCurrency() {
-  localStorage.setItem(CURRENCY_KEY, appCurrency);
+  localStorage.setItem(userCacheKey(CURRENCY_KEY), appCurrency);
   settingsDocRef.set({ currency: appCurrency }, { merge: true }).catch((error) => reportSyncWriteError(error, "currency"));
 }
 
@@ -1126,7 +1362,7 @@ function loadCurrencySync() {
       if (data && typeof data.currency === "string" && SUPPORTED_CURRENCIES.includes(data.currency)) {
         if (data.currency !== appCurrency) {
           appCurrency = data.currency;
-          localStorage.setItem(CURRENCY_KEY, appCurrency);
+          localStorage.setItem(userCacheKey(CURRENCY_KEY), appCurrency);
           syncCurrencySelect();
           updateUI();
         }
@@ -1359,12 +1595,12 @@ function normalizeTransaction(docId, data) {
 }
 
 function cacheTransactionsLocally() {
-  localStorage.setItem(LOCAL_TRANSACTIONS_KEY, JSON.stringify(transactions));
+  localStorage.setItem(userCacheKey(LOCAL_TRANSACTIONS_KEY), JSON.stringify(transactions));
 }
 
 function loadCachedTransactions() {
   try {
-    const raw = localStorage.getItem(LOCAL_TRANSACTIONS_KEY);
+    const raw = localStorage.getItem(userCacheKey(LOCAL_TRANSACTIONS_KEY));
     if (!raw) return;
 
     const parsed = JSON.parse(raw);
@@ -1379,7 +1615,7 @@ function loadCachedTransactions() {
 async function loadTransactions() {
   setSyncBadge("syncing");
 
-  db.collection("transactions").onSnapshot(
+  transactionsCol().onSnapshot(
     async (snapshot) => {
       transactions = [];
       snapshot.forEach((doc) => {
@@ -1439,7 +1675,7 @@ function addTransaction(type) {
 
   setSyncBadge("syncing");
 
-  db.collection("transactions")
+  transactionsCol()
     .add({
       type,
       desc,
@@ -1477,7 +1713,7 @@ function deleteTransaction(id) {
 
   deletedTransactionCache = { ...transaction };
 
-  db.collection("transactions")
+  transactionsCol()
     .doc(id)
     .delete()
     .then(() => {
@@ -1495,7 +1731,7 @@ function undoDelete() {
   const copy = { ...deletedTransactionCache };
   delete copy.id;
 
-  db.collection("transactions")
+  transactionsCol()
     .add(copy)
     .then(() => {
       deletedTransactionCache = null;
@@ -1552,7 +1788,7 @@ function saveEditTransaction() {
 
   setSyncBadge("syncing");
 
-  db.collection("transactions")
+  transactionsCol()
     .doc(id)
     .update({
       desc,
@@ -2366,12 +2602,12 @@ function normalizeBill(docId, data) {
 }
 
 function cacheBillsLocally() {
-  localStorage.setItem(LOCAL_BILLS_KEY, JSON.stringify(bills));
+  localStorage.setItem(userCacheKey(LOCAL_BILLS_KEY), JSON.stringify(bills));
 }
 
 function loadCachedBills() {
   try {
-    const raw = localStorage.getItem(LOCAL_BILLS_KEY);
+    const raw = localStorage.getItem(userCacheKey(LOCAL_BILLS_KEY));
     if (!raw) return;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return;
@@ -2381,7 +2617,7 @@ function loadCachedBills() {
 }
 
 function loadBills() {
-  db.collection("bills").onSnapshot(
+  billsCol().onSnapshot(
     (snapshot) => {
       bills = [];
       snapshot.forEach((doc) => bills.push(normalizeBill(doc.id, doc.data())));
@@ -2451,14 +2687,14 @@ function addBill() {
   const data = getBillInputData();
   if (!data) return;
   const now = Date.now();
-  db.collection("bills").add({ ...data, paidDates: [], createdAt: now, updatedAt: now })
+  billsCol().add({ ...data, paidDates: [], createdAt: now, updatedAt: now })
     .then(() => { clearBillInputs(); showToast(t("billSaved")); })
     .catch((error) => { console.error("Error adding bill:", error); alert(t("addError")); });
 }
 
 function deleteBill(id) {
   if (!confirm(t("confirmDelete"))) return;
-  db.collection("bills").doc(id).delete()
+  billsCol().doc(id).delete()
     .then(() => showToast(t("billDeleted")))
     .catch((error) => { console.error("Error deleting bill:", error); alert(t("deleteError")); });
 }
@@ -2484,7 +2720,7 @@ function markBillPaid(id) {
   const now = Date.now();
   const paidDate = getStartOfDay(getTodayInputValue());
 
-  db.collection("transactions").add({
+  transactionsCol().add({
     type: "Expense",
     desc: bill.name,
     amount: Number(bill.amount),
@@ -2497,7 +2733,7 @@ function markBillPaid(id) {
     createdAt: now,
     updatedAt: now
   }).then(() => {
-    return db.collection("bills").doc(id).update({
+    return billsCol().doc(id).update({
       dueDate: getNextBillDueDate(bill),
       paidDates: firebase.firestore.FieldValue.arrayUnion(paidDate),
       updatedAt: now
@@ -2659,7 +2895,7 @@ async function processRecurringTransactions() {
         // generating the same occurrence converge on one doc instead of
         // creating duplicates. Never deletes user data.
         const deterministicId = `${item.generatedFromBaseId}_${item.generatedForDate}`;
-        batch.set(db.collection("transactions").doc(deterministicId), item);
+        batch.set(transactionsCol().doc(deterministicId), item);
       }
       await batch.commit();
     }
@@ -3391,13 +3627,13 @@ document.addEventListener("DOMContentLoaded", () => {
   buildCurrencySelect();
   buildPeriodToggle();
   setupTransactionSwipe();
-  buildDeviceIdCard(); // AUTH (v19): device ID card shows the anonymous sync UID
-  buildSideMenuAuth(); // AUTH (v19): version label in side menu
+  buildDeviceIdCard(); // AUTH (v21): account card shows the Google account
+  buildSideMenuAuth(); // AUTH (v21): account block + version label in side menu
   updateDeviceIdUI();
   stripHardcodedCurrencySymbols();
 
   populateCategorySelects();
-  // AUTH (v19): cached data loads after anonymous sign-in (inside startFirestoreListeners).
+  // AUTH (v21): cached data loads after Google sign-in (inside startFirestoreListeners).
   registerServiceWorker();
 
   document.getElementById("monthPicker")?.addEventListener("change", () => {
@@ -3482,7 +3718,7 @@ document.addEventListener("DOMContentLoaded", () => {
   translateStaticText();
   populateCategorySelects();
   try {
-    ensureAuthenticated(); // AUTH (v19): silent anonymous sign-in, then listeners attach
+    ensureAuthenticated(); // AUTH (v21): Google sign-in gate, then listeners attach
   } catch (error) {
     console.error("Auth init failed:", error);
     showToast(t("signInError"));
