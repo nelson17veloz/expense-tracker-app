@@ -16,7 +16,7 @@ try {
 
 // APP VERSION: shown at the bottom of the side menu so we can tell
 // exactly which code a device is running. Bump on every shipped change.
-const APP_VERSION = "v21";
+const APP_VERSION = "v22";
 
 let transactions = [];
 let bills = [];
@@ -1005,12 +1005,36 @@ function ensureAuthenticated() {
   });
 }
 
-function signInWithGoogle() {
+// AUTH (v22): popup-first Google sign-in. A popup surfaces auth errors
+// directly (redirect failures are silent), so a failed attempt shows a
+// readable toast instead of looping back quietly. If the browser blocks
+// popups (some mobile browsers do), fall back to the redirect flow;
+// onAuthStateChanged + getRedirectResult() handle the rest either way.
+async function signInWithGoogle() {
+  const auth = firebase.auth();
   const provider = new firebase.auth.GoogleAuthProvider();
-  firebase.auth().signInWithRedirect(provider).catch((error) => {
-    console.error("Google sign-in failed:", error);
-    showToast(t("signInError"));
-  });
+  try {
+    await auth.signInWithPopup(provider);
+    // onAuthStateChanged loads the user's data from here.
+  } catch (error) {
+    const code = (error && error.code) || "";
+    console.error("Google sign-in failed:", code, error);
+    if (code === "auth/popup-blocked") {
+      // Popups blocked (often mobile): fall back to the redirect flow.
+      auth.signInWithRedirect(provider).catch((redirectError) => {
+        console.error("Google redirect sign-in failed:", redirectError);
+        showToast(t("signInError"));
+      });
+    } else if (code === "auth/operation-not-allowed") {
+      showToast(t("enableGoogleProvider"));
+    } else if (code === "auth/unauthorized-domain") {
+      showToast(t("unauthorizedDomain"));
+    } else if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+      // User dismissed the popup themselves; stay quiet.
+    } else {
+      showToast(t("signInError"));
+    }
+  }
 }
 
 function signOutAndReload() {
