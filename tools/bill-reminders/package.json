@@ -1,31 +1,14 @@
-
-package.json
-
-▼
-{7}
-
-▼
-dependencies:
-{2}
-firebase-admin:
-"^13.0.0"
-web-push:
-"^3.6.7"
-description:
-"Daily bill-reminder push sender for the Expense Tracker web app. Run by GitHub Actions; see send-bill-reminders.js."
-main:
-"send-bill-reminders.js"
-name:
-"expense-tracker-bill-reminders"
-private:
-true
-
-▼
-scripts:
-{1}
-start:
-"node send-bill-reminders.js"
-version:
-"1.0.0"
-
-Chat — Cendrik
+{
+  "name": "expense-tracker-bill-reminders",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daily bill-reminder push sender for the Expense Tracker web app. Run by GitHub Actions; see send-bill-reminders.js.",
+  "main": "send-bill-reminders.js",
+  "scripts": {
+    "start": "node send-bill-reminders.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0",
+    "web-push": "^3.6.7"
+  }
+}
