@@ -16,7 +16,7 @@ try {
 
 // APP VERSION: shown at the bottom of the side menu so we can tell
 // exactly which code a device is running. Bump on every shipped change.
-const APP_VERSION = "v23";
+const APP_VERSION = "v24";
 
 let transactions = [];
 let bills = [];
@@ -311,6 +311,17 @@ const translations = {
     authSecureNote: "Secured by Google sign-in",
     signInError: "Sign-in failed. Please try again.",
     popupBlocked: "Pop-up blocked. Open the app link directly in Safari or Chrome (not inside Messages or Gmail), allow pop-ups, and try again.",
+    notifTitle: "Bill reminders",
+    notifEnable: "Turn on bill reminders",
+    notifDisable: "Turn off bill reminders",
+    notifOn: "On for this device — you'll get a push before a bill is due, on its due date, and if it goes past due.",
+    notifOff: "Get a push on this device when a bill is coming due, on its due date, and if it goes past due. Each bill's “Remind Me” days set how early the first one arrives.",
+    notifInstallHint: "On iPhone, reminders only work in the installed app: Share → Add to Home Screen, open the app from its icon, then turn reminders on here.",
+    notifDenied: "Notifications are blocked for this app. Allow them in your device's Settings → Notifications, then try again.",
+    notifUnsupported: "This browser doesn't support push notifications.",
+    notifEnabledToast: "Bill reminders are on for this device.",
+    notifDisabledToast: "Bill reminders are off for this device.",
+    notifError: "Couldn't change bill reminders. Please try again.",
     enableGoogleProvider: "Enable Google sign-in in Firebase Console \u2192 Authentication \u2192 Sign-in method, then try again.",
     unauthorizedDomain: "This site\u2019s domain isn\u2019t authorized for sign-in. Add it in Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
     deviceId: "Device ID",
@@ -515,6 +526,17 @@ const translations = {
     authSecureNote: "Protegido con inicio de sesión de Google",
     signInError: "Error al iniciar sesión. Inténtalo de nuevo.",
     popupBlocked: "Ventana emergente bloqueada. Abre el enlace de la app directamente en Safari o Chrome (no dentro de Mensajes o Gmail), permite las ventanas emergentes e inténtalo de nuevo.",
+    notifTitle: "Recordatorios de facturas",
+    notifEnable: "Activar recordatorios de facturas",
+    notifDisable: "Desactivar recordatorios de facturas",
+    notifOn: "Activados en este dispositivo: recibirás un aviso antes de que venza una factura, el día de su vencimiento y si se pasa de fecha.",
+    notifOff: "Recibe un aviso en este dispositivo cuando una factura esté por vencer, el día de su vencimiento y si se pasa de fecha. Los días de “Recordarme” de cada factura definen con cuánta anticipación llega el primer aviso.",
+    notifInstallHint: "En iPhone, los recordatorios solo funcionan en la app instalada: Compartir → Agregar a pantalla de inicio, abre la app desde su ícono y luego activa los recordatorios aquí.",
+    notifDenied: "Las notificaciones están bloqueadas para esta app. Permítelas en Ajustes → Notificaciones de tu dispositivo e inténtalo de nuevo.",
+    notifUnsupported: "Este navegador no admite notificaciones push.",
+    notifEnabledToast: "Recordatorios de facturas activados en este dispositivo.",
+    notifDisabledToast: "Recordatorios de facturas desactivados en este dispositivo.",
+    notifError: "No se pudieron cambiar los recordatorios. Inténtalo de nuevo.",
     enableGoogleProvider: "Activa el inicio de sesión con Google en Firebase Console \u2192 Authentication \u2192 Sign-in method e inténtalo de nuevo.",
     unauthorizedDomain: "El dominio de este sitio no est\u00e1 autorizado para iniciar sesi\u00f3n. Agr\u00e9galo en Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
     deviceId: "ID del dispositivo",
@@ -995,6 +1017,7 @@ function ensureAuthenticated() {
       updateSideMenuAuthUI();
       startFirestoreListeners();
       maybeOfferMigration();
+      syncPushSubscription(); // v24: keep this device's push subscription fresh
     } else {
       // No Google session. A stale anonymous session from v19/v20 is signed
       // out so only Google sessions remain; the callback re-fires with null.
@@ -1046,6 +1069,180 @@ async function signInWithGoogle() {
 
 function signOutAndReload() {
   firebase.auth().signOut().catch(() => {}).finally(() => location.reload());
+}
+
+// ============================================================
+// BILL REMINDERS (v24): standard Web Push — deliberately NOT the FCM
+// JavaScript SDK. The app is pinned to the Firebase 8.10.1 SDK, which
+// predates Safari web-push support; the raw Push API works everywhere
+// push exists (Chrome/Android, desktop, and iPhone Home Screen apps on
+// iOS 16.4+). A GitHub Actions job (tools/bill-reminders in the repo)
+// reads each user's bills + device subscriptions once a morning and
+// sends: one reminder when the bill enters its own "Remind Me" window
+// (per-bill, user-chosen), one on the due date, and one if it goes past
+// due — each showing the bill name, amount, and due date.
+//
+// Subscriptions live at users/{uid}/devices/{endpointHash} — private
+// per account under the existing Firestore rules; no rules change.
+// The VAPID public key below is public by design; its private half
+// lives only in the sender's GitHub Secrets.
+// ============================================================
+const WEB_PUSH_PUBLIC_KEY = "BFvMoeHWpZ-ywEvoga3Eutq4G1FWxoJB2eDwqJIzwI7QyJmegdY2tcUm_F02okCV1egbRyTFV9DaPR3zRafKPsM";
+
+function pushDeviceKey() {
+  return authUid ? `et_push_device_${authUid}` : null;
+}
+
+function isStandaloneApp() {
+  return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+}
+
+function isIosDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent || "");
+}
+
+function pushSupported() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+async function pushEndpointId(endpoint) {
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint));
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch (_) {
+    let h = 0;
+    for (let i = 0; i < endpoint.length; i++) h = ((h * 31) + endpoint.charCodeAt(i)) >>> 0;
+    return `dev-${h.toString(16)}-${endpoint.length}`;
+  }
+}
+
+async function savePushSubscription(subscription) {
+  if (!authUid || !subscription) return;
+  const json = subscription.toJSON();
+  const id = await pushEndpointId(subscription.endpoint);
+  await userDoc().collection("devices").doc(id).set({
+    endpoint: subscription.endpoint,
+    keys: json.keys || {},
+    timezone: (Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York"),
+    language: currentLanguage,
+    platform: navigator.userAgent || "",
+    standalone: isStandaloneApp(),
+    appVersion: APP_VERSION,
+    updatedAt: Date.now()
+  }, { merge: true });
+  const key = pushDeviceKey();
+  if (key) localStorage.setItem(key, id);
+}
+
+async function enableBillReminders() {
+  // iPhone/iPad: push only exists inside the installed (Home Screen)
+  // app. In a Safari/Chrome tab the Notification API isn't even
+  // present — explain the install step instead of failing silently.
+  if (isIosDevice() && !isStandaloneApp()) {
+    showToast(t("notifInstallHint"));
+    refreshNotifUI();
+    return;
+  }
+  if (!pushSupported()) {
+    showToast(t("notifUnsupported"));
+    return;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      showToast(t("notifDenied"));
+      refreshNotifUI();
+      return;
+    }
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY)
+      });
+    }
+    await savePushSubscription(subscription);
+    showToast(t("notifEnabledToast"));
+  } catch (error) {
+    console.error("Enabling bill reminders failed:", error);
+    showToast(t("notifError"));
+  }
+  refreshNotifUI();
+}
+
+async function disableBillReminders() {
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      const id = await pushEndpointId(subscription.endpoint);
+      if (authUid) await userDoc().collection("devices").doc(id).delete().catch(() => {});
+      await subscription.unsubscribe().catch(() => {});
+    }
+    const key = pushDeviceKey();
+    if (key) localStorage.removeItem(key);
+    showToast(t("notifDisabledToast"));
+  } catch (error) {
+    console.error("Disabling bill reminders failed:", error);
+    showToast(t("notifError"));
+  }
+  refreshNotifUI();
+}
+
+// On sign-in: if this device had reminders on, re-save the current
+// subscription (endpoints rotate/revoke over time). Never prompts —
+// permission was already granted by the explicit button tap.
+async function syncPushSubscription() {
+  try {
+    if (!authUid || !pushSupported()) return;
+    const key = pushDeviceKey();
+    if (!key || !localStorage.getItem(key)) return;
+    if (Notification.permission !== "granted") return;
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) await savePushSubscription(subscription);
+    else localStorage.removeItem(key);
+  } catch (_) {}
+  refreshNotifUI();
+}
+
+async function refreshNotifUI() {
+  const btn = document.getElementById("notifToggleBtn");
+  const status = document.getElementById("notifStatus");
+  if (!btn || !status) return;
+  const label = btn.querySelector("[data-notif-label]") || btn;
+  if (isIosDevice() && !isStandaloneApp()) {
+    label.textContent = t("notifEnable");
+    btn.disabled = false;
+    status.textContent = t("notifInstallHint");
+    return;
+  }
+  if (!pushSupported()) {
+    label.textContent = t("notifEnable");
+    btn.disabled = true;
+    status.textContent = t("notifUnsupported");
+    return;
+  }
+  btn.disabled = false;
+  let on = false;
+  try {
+    if (Notification.permission === "granted") {
+      const registration = await navigator.serviceWorker.ready;
+      on = !!(await registration.pushManager.getSubscription());
+    }
+  } catch (_) {}
+  label.textContent = on ? t("notifDisable") : t("notifEnable");
+  status.textContent = on ? t("notifOn") : (Notification.permission === "denied" ? t("notifDenied") : t("notifOff"));
 }
 
 const GOOGLE_G_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.27c0-.85-.08-1.66-.22-2.45H12v4.64h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.09 3.57-5.16 3.57-8.81z"/><path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.87-3c-1.07.72-2.44 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.29v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.27 14.28A7.2 7.2 0 0 1 4.89 12c0-.79.14-1.56.38-2.28v-3.1H1.29a12 12 0 0 0 0 10.76l3.98-3.1z"/><path fill="#EA4335" d="M12 4.76c1.76 0 3.35.61 4.6 1.8l3.42-3.42A11.98 11.98 0 0 0 12 0 12 12 0 0 0 1.29 6.62l3.98 3.1C6.22 6.87 8.87 4.76 12 4.76z"/></svg>';
@@ -1235,7 +1432,38 @@ function buildDeviceIdCard() {
   card.appendChild(header);
   card.appendChild(row);
   card.appendChild(hint);
+  // v24: bill-reminder push toggle lives on the same account card.
+  const notifTitle = document.createElement("div");
+  notifTitle.className = "section-header";
+  const notifH = document.createElement("h3");
+  notifH.setAttribute("data-i18n", "notifTitle");
+  notifH.textContent = t("notifTitle");
+  notifTitle.appendChild(notifH);
+  card.appendChild(notifTitle);
+  const notifRow = document.createElement("div");
+  notifRow.className = "device-id-row";
+  const notifBtn = document.createElement("button");
+  notifBtn.type = "button";
+  notifBtn.id = "notifToggleBtn";
+  notifBtn.className = "device-id-btn";
+  const notifLabel = document.createElement("span");
+  notifLabel.setAttribute("data-notif-label", "");
+  notifLabel.textContent = t("notifEnable");
+  notifBtn.appendChild(notifLabel);
+  notifBtn.addEventListener("click", async () => {
+    const registration = ("serviceWorker" in navigator) ? await navigator.serviceWorker.ready.catch(() => null) : null;
+    const existing = registration ? await registration.pushManager.getSubscription().catch(() => null) : null;
+    if (existing && Notification.permission === "granted") disableBillReminders();
+    else enableBillReminders();
+  });
+  notifRow.appendChild(notifBtn);
+  card.appendChild(notifRow);
+  const notifStatus = document.createElement("p");
+  notifStatus.className = "device-id-hint";
+  notifStatus.id = "notifStatus";
+  card.appendChild(notifStatus);
   anchor.after(card);
+  refreshNotifUI();
 }
 
 // AUTH (v21): side menu shows the signed-in Google account, a sign-out
@@ -1274,6 +1502,7 @@ function updateDeviceIdUI() {
   const value = document.getElementById("deviceIdValue");
   if (value) value.textContent = authEmail || t("notSignedIn");
   updateSideMenuAuthUI();
+  refreshNotifUI();
   // Keep the sync badge tooltip in sync (setSyncBadge also appends it).
   const syncBadge = document.getElementById("syncBadge");
   if (syncBadge && authUid) syncBadge.title = `${t("tapToRefresh")}\n${t("deviceId")}: ${authUid}`;
