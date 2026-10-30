@@ -1,8 +1,8 @@
-// v22: network-first for the app shell so a deployed fix can take effect
+// v23: network-first for the app shell so a deployed fix can take effect
 // without being trapped behind a stale cached copy; cache-first only for
 // static images. Cross-origin requests (Firebase, Google sign-in) are never
 // intercepted.
-const CACHE_NAME = "expense-tracker-shell-v22";
+const CACHE_NAME = "expense-tracker-shell-v23";
 
 const ASSETS = [
   "./",

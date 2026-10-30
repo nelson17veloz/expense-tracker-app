@@ -16,7 +16,7 @@ try {
 
 // APP VERSION: shown at the bottom of the side menu so we can tell
 // exactly which code a device is running. Bump on every shipped change.
-const APP_VERSION = "v22";
+const APP_VERSION = "v23";
 
 let transactions = [];
 let bills = [];
@@ -310,6 +310,7 @@ const translations = {
     authFeature3: "Works offline, syncs on reconnect",
     authSecureNote: "Secured by Google sign-in",
     signInError: "Sign-in failed. Please try again.",
+    popupBlocked: "Pop-up blocked. Open the app link directly in Safari or Chrome (not inside Messages or Gmail), allow pop-ups, and try again.",
     enableGoogleProvider: "Enable Google sign-in in Firebase Console \u2192 Authentication \u2192 Sign-in method, then try again.",
     unauthorizedDomain: "This site\u2019s domain isn\u2019t authorized for sign-in. Add it in Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
     deviceId: "Device ID",
@@ -513,6 +514,7 @@ const translations = {
     authFeature3: "Funciona sin conexión y se sincroniza al reconectar",
     authSecureNote: "Protegido con inicio de sesión de Google",
     signInError: "Error al iniciar sesión. Inténtalo de nuevo.",
+    popupBlocked: "Ventana emergente bloqueada. Abre el enlace de la app directamente en Safari o Chrome (no dentro de Mensajes o Gmail), permite las ventanas emergentes e inténtalo de nuevo.",
     enableGoogleProvider: "Activa el inicio de sesión con Google en Firebase Console \u2192 Authentication \u2192 Sign-in method e inténtalo de nuevo.",
     unauthorizedDomain: "El dominio de este sitio no est\u00e1 autorizado para iniciar sesi\u00f3n. Agr\u00e9galo en Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains.",
     deviceId: "ID del dispositivo",
@@ -967,11 +969,14 @@ function updateConnectionBadge() {
 // AUTH (v21): Google sign-in. Every Firestore listener and every
 // Firestore write below only runs after Firebase Auth reports a Google
 // (non-anonymous) user. The login overlay gates the whole app until then.
-// Redirect (not popup) is used because it works reliably on mobile browsers.
+// Popup (not redirect) is used: redirect breaks on storage-partitioned
+// browsers because the app domain differs from authDomain (see v23 note
+// on signInWithGoogle below).
 // ============================================================
 function ensureAuthenticated() {
-  // Surface redirect-result errors (e.g. Google provider not enabled in the
-  // Firebase console, or the domain not authorized).
+  // Legacy: surface any redirect-result errors for sessions started by
+  // older builds (e.g. Google provider not enabled in the Firebase
+  // console, or the domain not authorized).
   firebase.auth().getRedirectResult().catch((error) => {
     console.error("Google sign-in failed:", error);
     if (error && error.code === "auth/operation-not-allowed") showToast(t("enableGoogleProvider"));
@@ -1005,11 +1010,17 @@ function ensureAuthenticated() {
   });
 }
 
-// AUTH (v22): popup-first Google sign-in. A popup surfaces auth errors
-// directly (redirect failures are silent), so a failed attempt shows a
-// readable toast instead of looping back quietly. If the browser blocks
-// popups (some mobile browsers do), fall back to the redirect flow;
-// onAuthStateChanged + getRedirectResult() handle the rest either way.
+// AUTH (v23): popup-ONLY Google sign-in. Do NOT fall back to
+// signInWithRedirect: the app is hosted on github.io while authDomain is
+// firebaseapp.com, so on storage-partitioned browsers (especially iOS
+// Safari and in-app browsers) the redirect flow dies on the Firebase
+// handler page with "Unable to process request due to missing initial
+// state... Using signInWithRedirect in a storage-partitioned browser
+// environment." Popup is Google's documented best-practice fix for
+// non-Firebase hosting (Identity Platform redirect best practices,
+// Option 2). If the popup is blocked or the environment doesn't support
+// it (e.g. the link was opened inside Messages/Gmail), say so plainly
+// instead of sending the user into the broken redirect flow.
 async function signInWithGoogle() {
   const auth = firebase.auth();
   const provider = new firebase.auth.GoogleAuthProvider();
@@ -1019,12 +1030,8 @@ async function signInWithGoogle() {
   } catch (error) {
     const code = (error && error.code) || "";
     console.error("Google sign-in failed:", code, error);
-    if (code === "auth/popup-blocked") {
-      // Popups blocked (often mobile): fall back to the redirect flow.
-      auth.signInWithRedirect(provider).catch((redirectError) => {
-        console.error("Google redirect sign-in failed:", redirectError);
-        showToast(t("signInError"));
-      });
+    if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
+      showToast(t("popupBlocked"));
     } else if (code === "auth/operation-not-allowed") {
       showToast(t("enableGoogleProvider"));
     } else if (code === "auth/unauthorized-domain") {
