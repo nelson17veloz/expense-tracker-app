@@ -1,14 +1,16 @@
 name: Bill reminders
 
-# Sends the daily bill-reminder pushes for the Expense Tracker app.
-# 13:00 UTC = 9:00 AM EDT / 8:00 AM EST — GitHub cron is UTC-only and
-# best-effort, so the exact minute can drift a little; that's fine for
-# a morning bill reminder. Can also be run on demand from the Actions
-# tab (use the dry_run input to log what WOULD be sent, sending nothing).
+# Sends the bill-reminder pushes for the Expense Tracker app, twice a
+# day: 13:00 UTC = 9:00 AM EDT / 8:00 AM EST, and 01:00 UTC = 9:00 PM
+# EDT / 8:00 PM EST — GitHub cron is UTC-only and best-effort, so the
+# exact minute can drift a little; that's fine for a bill reminder.
+# The sender dedupes per morning/evening slot, so each run sends its
+# own copy. Can also be run on demand from the Actions tab (use the
+# dry_run input to log what WOULD be sent, sending nothing).
 
 on:
   schedule:
-    - cron: "0 13 * * *"
+    - cron: "0 1,13 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
