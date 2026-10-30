@@ -59,9 +59,19 @@ function daySerial(timestampMs, timeZone) {
   return Math.floor(Date.UTC(get("year"), get("month") - 1, get("day")) / 86400000);
 }
 
-function formatDueDate(timestampMs, timeZone) {
+// The app stores bill due dates as UTC midnights (see getStartOfDay in
+// app.js: "day boundaries are UTC midnights"), so a due date's calendar
+// day must be read in UTC — reading it in the user's timezone shifts it
+// back a day for anyone behind UTC (e.g. Nov 1 stored = Oct 31 evening
+// in New York). "Today", on the other hand, is the user's local day
+// (daySerial above), mapped onto the same UTC-serial scale.
+function dueDaySerial(timestampMs) {
+  return Math.floor(timestampMs / 86400000);
+}
+
+function formatDueDate(timestampMs) {
   return new Intl.DateTimeFormat("en-US", {
-    timeZone,
+    timeZone: "UTC",
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -72,7 +82,7 @@ function formatDueDate(timestampMs, timeZone) {
 function buildMessage(kind, bill, daysUntil, timeZone, currency) {
   const name = String(bill.name || "Bill");
   const amount = new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(bill.amount || 0));
-  const dueStr = formatDueDate(Number(bill.dueDate), timeZone);
+  const dueStr = formatDueDate(Number(bill.dueDate));
   if (kind === "reminder") {
     const when = daysUntil === 1 ? "tomorrow" : `in ${daysUntil} days`;
     return { title: `Bill reminder: ${name}`, body: `${name} — ${amount} — due ${dueStr} (${when})` };
@@ -150,23 +160,35 @@ async function main() {
 
     const todaySerial = daySerial(Date.now(), timeZone);
 
+    // Twice-a-day dedupe: the workflow runs once in the morning and
+    // once in the evening (user's local time), and each slot gets its
+    // own "already sent" marker per bill + due date, so a bill that
+    // notified at 9 AM notifies again at 9 PM but never twice within
+    // the same slot.
+    const localHour = Number(new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      hourCycle: "h23"
+    }).format(new Date()));
+    const slot = localHour < 12 ? "Am" : "Pm";
+
     for (const { ref, data: bill } of bills) {
       const due = Number(bill.dueDate || 0);
       if (!due) continue;
       const reminderDays = Number(bill.reminderDays ?? 3);
-      const daysUntil = daySerial(due, timeZone) - todaySerial;
+      const daysUntil = dueDaySerial(due) - todaySerial;
 
       let kind = null;
       let markerField = null;
-      if (daysUntil > 0 && reminderDays > 0 && daysUntil <= reminderDays && Number(bill.reminderSentForDue || 0) !== due) {
+      if (daysUntil > 0 && reminderDays > 0 && daysUntil <= reminderDays && Number(bill[`reminder${slot}SentForDue`] || 0) !== due) {
         kind = "reminder";
-        markerField = "reminderSentForDue";
-      } else if (daysUntil === 0 && Number(bill.dueSentForDue || 0) !== due) {
+        markerField = `reminder${slot}SentForDue`;
+      } else if (daysUntil === 0 && Number(bill[`due${slot}SentForDue`] || 0) !== due) {
         kind = "due";
-        markerField = "dueSentForDue";
-      } else if (daysUntil < 0 && Number(bill.pastDueSentForDue || 0) !== due) {
+        markerField = `due${slot}SentForDue`;
+      } else if (daysUntil < 0 && Number(bill[`pastDue${slot}SentForDue`] || 0) !== due) {
         kind = "pastdue";
-        markerField = "pastDueSentForDue";
+        markerField = `pastDue${slot}SentForDue`;
       }
       if (!kind) continue;
 
