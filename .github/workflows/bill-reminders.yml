@@ -1,0 +1,42 @@
+name: Bill reminders
+
+# Sends the daily bill-reminder pushes for the Expense Tracker app.
+# 13:00 UTC = 9:00 AM EDT / 8:00 AM EST — GitHub cron is UTC-only and
+# best-effort, so the exact minute can drift a little; that's fine for
+# a morning bill reminder. Can also be run on demand from the Actions
+# tab (use the dry_run input to log what WOULD be sent, sending nothing).
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: log what would be sent, send nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install sender dependencies
+        working-directory: tools/bill-reminders
+        run: npm install --no-audit --no-fund
+
+      - name: Send bill reminders
+        working-directory: tools/bill-reminders
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'true' || 'false' }}
+        run: node send-bill-reminders.js
