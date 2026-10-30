@@ -84,9 +84,25 @@ function buildMessage(kind, bill, daysUntil, timeZone, currency) {
   return { title: `Bill past due: ${name}`, body: `${name} — ${amount} — was due ${dueStr} (${ago})` };
 }
 
+// The VAPID private key is a single 43-character URL-safe Base64 token
+// that decodes to 32 bytes. Be forgiving about how the secret was
+// pasted (extra words/whitespace around it, e.g. the whole key file):
+// if the raw value isn't exactly that token, scan it for a run of
+// Base64-URL characters that is.
+function cleanVapidPrivateKey(raw) {
+  const trimmed = String(raw || "").trim();
+  const isKey = (s) => /^[A-Za-z0-9_-]+$/.test(s) && Buffer.from(s, "base64url").length === 32;
+  if (isKey(trimmed)) return trimmed;
+  const runs = trimmed.match(/[A-Za-z0-9_-]{20,}/g) || [];
+  for (const run of runs) {
+    if (isKey(run)) return run;
+  }
+  return trimmed; // let web-push throw its precise validation error
+}
+
 async function main() {
   const serviceAccount = JSON.parse(requireEnv("FIREBASE_SERVICE_ACCOUNT_JSON"));
-  const vapidPrivateKey = requireEnv("VAPID_PRIVATE_KEY");
+  const vapidPrivateKey = cleanVapidPrivateKey(requireEnv("VAPID_PRIVATE_KEY"));
 
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
   const db = admin.firestore();
