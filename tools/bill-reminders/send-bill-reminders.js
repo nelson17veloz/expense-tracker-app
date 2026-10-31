@@ -182,11 +182,21 @@ async function main() {
       const reminderDays = Number(bill.reminderDays ?? 3);
       const daysUntil = dueDaySerial(due) - todaySerial;
 
+      // Reminders repeat EVERY DAY inside the bill's reminder window
+      // (user request, 2026-10-30): from `reminderDays` days before
+      // the due date until the day before it, once per slot per day.
+      // So the reminder marker stores "due:todaySerial" — it blocks a
+      // second send within the same slot today and re-arms tomorrow.
+      // Due-day and past-due pushes keep their once-per-due-date
+      // markers (plain due timestamp).
+      const reminderMark = `${due}:${todaySerial}`;
       let kind = null;
       let markerField = null;
-      if (daysUntil > 0 && reminderDays > 0 && daysUntil <= reminderDays && Number(bill[`reminder${slot}SentForDue`] || 0) !== due) {
+      let markerValue = due;
+      if (daysUntil > 0 && reminderDays > 0 && daysUntil <= reminderDays && String(bill[`reminder${slot}SentForDue`] || "") !== reminderMark) {
         kind = "reminder";
         markerField = `reminder${slot}SentForDue`;
+        markerValue = reminderMark;
       } else if (daysUntil === 0 && Number(bill[`due${slot}SentForDue`] || 0) !== due) {
         kind = "due";
         markerField = `due${slot}SentForDue`;
@@ -231,7 +241,7 @@ async function main() {
       }
 
       if (delivered > 0) {
-        await ref.update({ [markerField]: due });
+        await ref.update({ [markerField]: markerValue });
         sent++;
         console.log(`Sent ${kind} for "${bill.name}" to ${delivered} device(s) of user ${uid}`);
       }
