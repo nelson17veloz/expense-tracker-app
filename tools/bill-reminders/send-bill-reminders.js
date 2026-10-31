@@ -164,13 +164,17 @@ async function main() {
     // once in the evening (user's local time), and each slot gets its
     // own "already sent" marker per bill + due date, so a bill that
     // notified at 9 AM notifies again at 9 PM but never twice within
-    // the same slot.
+    // the same slot. The slots are wide windows split at 3 PM / 3 AM
+    // local — NOT a noon split — because GitHub's scheduler can fire
+    // hours late: a "9 AM" run landing at 2 PM still belongs to the
+    // morning slot and must not eat the evening copy, and a "9 PM"
+    // run landing after midnight still belongs to the evening slot.
     const localHour = Number(new Intl.DateTimeFormat("en-US", {
       timeZone,
       hour: "numeric",
       hourCycle: "h23"
     }).format(new Date()));
-    const slot = localHour < 12 ? "Am" : "Pm";
+    const slot = localHour >= 3 && localHour < 15 ? "Am" : "Pm";
 
     for (const { ref, data: bill } of bills) {
       const due = Number(bill.dueDate || 0);
